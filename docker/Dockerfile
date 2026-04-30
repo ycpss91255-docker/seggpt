@@ -111,7 +111,7 @@ RUN apt-get update && \
 
 # Miniconda + Python 3.11 + mamba (faster solver)
 ARG PYTHON_VERSION=3.11
-ARG MAMBA_VERSION=1.5.*
+ARG MAMBA_VERSION=1.5.0
 ARG MINICONDA_VERSION=py311_23.5.2-0
 ARG TARGETPLATFORM
 
