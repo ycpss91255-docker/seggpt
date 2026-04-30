@@ -6,11 +6,13 @@ Single source of truth for all tests in this repository. Update the totals and p
 
 | Category | Count | Location |
 |---|---:|---|
-| Unit (pytest) | 0 | `test/unit/` |
+| Unit (pytest) | 60 | `test/unit/` |
 | Integration (pytest) | 0 | `test/integration/` |
 | Smoke (pytest) | 0 | `test/smoke/` |
 | Smoke (bats, docker image) | 20 | `docker/test/smoke/` |
-| **Total** | **20** | |
+| **Total** | **80** | |
+
+> One additional `test_tools.py` group is auto-skipped on hosts without the `yacs` package (`pytest.importorskip`); inside the docker image it runs and brings the unit total to ~74. Counts here track only what runs unconditionally on a host.
 
 ## Smoke (bats, docker image)
 
@@ -41,7 +43,15 @@ Located at `docker/test/smoke/seggpt_env.bats`. Exercises the `devel` image buil
 
 ## Unit (pytest)
 
-(none yet — will be populated as Layer 1 / 2 / 3 source code lands)
+Located at `test/unit/`. Imported via `test/conftest.py` which adds `src/` to `sys.path` so the in-tree `seggpt` package resolves without `pip install -e .`.
+
+| File | Tests | Coverage |
+|---|---:|---|
+| `runtime/utils/test_types.py` | 10 | `PathLike` alias accepts str/Path/bytes/os.PathLike; `class_property` resolves on class without instantiation; `ConfigLike` / `ListLikeInOut` round-trip through nested data |
+| `runtime/utils/test_naming.py` | 18 | `to_snake_case` and `to_camel_case` over CamelCase / mixedCase / acronym / empty / idempotency cases |
+| `runtime/utils/test_environment_variables.py` | 25 | `EnvironmentVariable` registry / get-set / type coercion / double-registration error; `BooleanEnvironmentVariable` truthy/falsy strings / non-bool default rejection / int-form persistence; `PathEnvironmentVariable` is_dir create-on-get / file-mode skip-create; `USE_CUDA` / `GSI_HOME` singletons |
+| `runtime/utils/test_logger.py` | 7 | level wrappers route to `seggpt.runtime` logger at correct level; non-string payloads pass through |
+| `runtime/utils/test_tools.py` | (auto-skip without `yacs`) | `check_path` GSI_HOME fallback / FileNotFoundError; `path_with_home` absolute / relative; `load_yaml` yacs-vs-dict round-trip; safe_load lockdown (rejects `!!python/object`) |
 
 ## Integration (pytest)
 

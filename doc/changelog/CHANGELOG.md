@@ -16,3 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - pytest test scaffold under `test/{unit,integration,smoke}/`.
 - Dockerfile customisation: CUDA 11.8 + cuDNN 8.6 base, miniconda + Python 3.11, pytorch 2.0.1 (cu118) ecosystem via mamba, SegGPT pip deps (timm 0.9.7, fairscale 0.4.13, fvcore, yacs, classy-fastapi, fastapi, uvicorn), detectron2 v0.6 built from upstream tag.
 - Smoke tests for the Dockerfile build: 20 bats checks covering conda / pytorch / opencv / detectron2 / pip deps / CUDA env (`docker/test/smoke/seggpt_env.bats`).
+- Layer 1 utility port from `generative-services-server`: `seggpt.runtime.utils.{types, naming, environment_variables, logger, tools}` slimmed down to the symbols the SegGPT runtime actually needs (~200 LOC vs. ~2000 upstream).
+- 60 pytest unit tests covering Layer 1 utilities, plus a 1-test skip block guarded by `pytest.importorskip("yacs")` for the YAML loader on hosts without `yacs`.
+
+### Changed
+
+- Restructure source layout: `src/{runtime,api,server}` -> `src/seggpt/{runtime,api,server}`, with `src/seggpt/__init__.py` declaring the top-level package. `pyproject.toml` no longer needs `package-dir` mapping.

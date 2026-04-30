@@ -12,9 +12,9 @@ Three layers, each builds on the previous:
 
 | Layer | Path | Role |
 |---|---|---|
-| Layer 1 | `src/runtime/` | Kernel — SegGPT model + service code (stateful `target` / `prompt` / `reset`). Internal, not exposed. |
-| Layer 2 | `src/api/` | Stable Python API: `SegGPTBackend.infer(target, refs, masks)` -> raw `{mask, class_id, inference_latency_ms, gpu_mem_mb}`. Stateless one-shot. The entry point downstream consumers import. |
-| Layer 3 | `src/server/` | FastAPI HTTP wrapper around Layer 2 for external clients and interactive testing. |
+| Layer 1 | `src/seggpt/runtime/` | Kernel — SegGPT model + service code (stateful `target` / `prompt` / `reset`). Internal, not exposed. |
+| Layer 2 | `src/seggpt/api/` | Stable Python API: `SegGPTBackend.infer(target, refs, masks)` -> raw `{mask, class_id, inference_latency_ms, gpu_mem_mb}`. Stateless one-shot. The entry point downstream consumers import. |
+| Layer 3 | `src/seggpt/server/` | FastAPI HTTP wrapper around Layer 2 for external clients and interactive testing. |
 
 ## Quick Start
 
@@ -57,9 +57,10 @@ seggpt/
 │   ├── setup.conf               per-repo runtime configuration
 │   └── test/smoke/              docker image smoke tests (bats)
 ├── src/
-│   ├── runtime/                 Layer 1 kernel (ported SegGPT model + service)
-│   ├── api/                     Layer 2 Python API (stable contract)
-│   └── server/                  Layer 3 FastAPI HTTP wrapper
+│   └── seggpt/                  Python package (installed as `seggpt`)
+│       ├── runtime/             Layer 1 kernel (ported SegGPT model + service)
+│       ├── api/                 Layer 2 Python API (stable contract)
+│       └── server/              Layer 3 FastAPI HTTP wrapper
 ├── third_party/
 │   └── detectron2/              detectron2 v0.6 (git subtree)
 ├── test/

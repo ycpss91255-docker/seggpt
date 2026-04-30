@@ -22,11 +22,9 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Image Recognition",
 ]
 
-[tool.setuptools]
-package-dir = { "seggpt" = "src" }
-
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["seggpt*"]
 namespaces = false
 
 [tool.pytest.ini_options]
