@@ -14,10 +14,18 @@ ARG TEST_TOOLS_IMAGE="test-tools:local"
 ############################## sys ##############################
 FROM ${BASE_IMAGE} AS sys
 
-ARG USER_NAME="user"
-ARG USER_GID=1000
-ARG USER_UID=1000
-ARG USER_GROUP="user"
+# CI's build-worker.yaml passes USER/GROUP/UID/GID, while compose.yaml
+# (local flow) passes USER_NAME/USER_GROUP/USER_UID/USER_GID. Declare
+# the short forms first so each long form can default to its short
+# counterpart — both flows then converge on the long names below.
+ARG USER="user"
+ARG GROUP="user"
+ARG UID=1000
+ARG GID=1000
+ARG USER_NAME="${USER}"
+ARG USER_GROUP="${GROUP}"
+ARG USER_UID="${UID}"
+ARG USER_GID="${GID}"
 ARG TZ="Asia/Taipei"
 ARG APT_MIRROR_UBUNTU="archive.ubuntu.com"
 ARG DEBIAN_FRONTEND=noninteractive
@@ -58,8 +66,12 @@ RUN if getent group "${USER_GID}" >/dev/null; then \
 FROM sys AS base
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG USER_NAME="user"
-ARG USER_GROUP="user"
+# Same USER/USER_NAME alias dance as sys — ARGs do not flow across
+# stages, so each stage that references the user has to redeclare.
+ARG USER="user"
+ARG GROUP="user"
+ARG USER_NAME="${USER}"
+ARG USER_GROUP="${GROUP}"
 
 # CUDA / cuDNN versions pinned to match SegGPT's pytorch 2.0.1 + cu118 wheel
 ARG NV_CUDNN_VERSION=8.6.0.163
