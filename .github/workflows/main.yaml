@@ -18,13 +18,14 @@ permissions:
 
 jobs:
   call-docker-build:
-    uses: ycpss91255-docker/template/.github/workflows/build-worker.yaml@v0.13.0
+    uses: ycpss91255-docker/template/.github/workflows/build-worker.yaml@v0.15.0
     with:
       image_name: seggpt
+      context_path: docker
 
   call-release:
     needs: call-docker-build
     if: startsWith(github.ref, 'refs/tags/')
-    uses: ycpss91255-docker/template/.github/workflows/release-worker.yaml@v0.13.0
+    uses: ycpss91255-docker/template/.github/workflows/release-worker.yaml@v0.15.0
     with:
       archive_name_prefix: seggpt
