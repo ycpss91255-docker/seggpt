@@ -162,7 +162,17 @@ pytest test/integration/runtime/test_seggpt_backend_e2e.py -v
 
 ### 5.3 對每個分割對象跑 4 個面向
 
-> 目前 `scripts/phase0.py` 只支援單次 inference。要做 §4.2 / §4.3 / §4.4 的多次掃描，需要先寫 driver — 見 §7「待補」。
+`scripts/phase0_driver.py` 是 multi-target / multi-N driver — 對 `<targets-dir>` 內每張 image × `<n-values>` 各跑一次 `infer()`，model 只 load 一次，輸出符合 §6 格式的 run dir。
+
+第一個具體實例：**iron_beam_prompt × small_target**（鐵色擋板 + 32 張小目標 + GT），完整流程見 [`doc/phase0-iron-beam-test.md`](phase0-iron-beam-test.md)。
+
+跑法（容器內，無參即 default 指向 iron_beam × small_target）：
+
+```bash
+python scripts/phase0_driver.py
+```
+
+要對其他分割對象跑同樣 4 個面向 → override `--prompts-dir` / `--targets-dir` / `--gt-dir` 指向對應 pool（綠擋板 / 藍擋板 / 棧板下緣，prompt pool 還沒備齊）。
 
 ## 6. 結果記錄格式
 

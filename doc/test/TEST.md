@@ -6,11 +6,11 @@ Single source of truth for all tests in this repository. Update the totals and p
 
 | Category | Count | Location |
 |---|---:|---|
-| Unit (pytest) | 74 | `test/unit/` |
+| Unit (pytest) | 84 | `test/unit/` |
 | Integration (pytest) | 4 | `test/integration/` |
 | Smoke (pytest) | 0 | `test/smoke/` |
 | Smoke (bats, docker image) | 20 | `docker/test/smoke/` |
-| **Total** | **98** | |
+| **Total** | **108** | |
 
 > Counts are `pytest --collect-only` items on a host without `yacs` / `torch`. Parametrised cases expand each function-def line into multiple test items (e.g. `test_naming.py`'s 5 functions yield 17 items). Inside the docker image two file-level skips lift (`test_tools.py`, `test_abstract_service.py`) and `test_services_utils.py`'s torch group runs, bringing the unit total to ~100.
 
@@ -56,6 +56,7 @@ Located at `test/unit/`. Imported via `test/conftest.py` which adds `src/` to `s
 | `runtime/services/test_services_utils.py` | 7 + 3 (torch skip) | `contains_var_keyword` / `get_var_keyword` over arg combinations; `torch_use_cuda` returns `cpu` / `cuda` per `USE_CUDA` env + `torch.cuda.is_available()` |
 | `runtime/services/test_abstract_service.py` | (auto-skip without `yacs`) | `ServiceFactory` registration via `__init_subclass__` / extra keywords / dup-check / unsupported-type / lookup miss; singleton + iter + contains protocol; `default_config` introspects `__init__` params (kwargs excluded); signature key extraction; `PathService` round-trip via YAML |
 | `api/test_backend.py` | (auto-skip without `yacs`) | `SegGPTBackend.infer()` calls reset/target/prompt in order; mode + class_id pass-through to Layer 1; refs/masks length-mismatch raises; latency > 0; gpu_mem zero on cpu; CUDA branch syncs + reads peak alloc; `service` property exposes Layer 1 |
+| `scripts/test_phase0_driver.py` | 10 | `_miou` over identical / disjoint / 1/3-overlap / 0-vs-255 nonzero-foreground / both-empty (eps); `_resize_to` is identity on shape-match, doubles via nearest-neighbor (no interpolation introduced), keeps binary {0,1}; `_N_SUBSETS` indices stay within prompt_01..08 and have no duplicates per N |
 
 ## Integration (pytest)
 
