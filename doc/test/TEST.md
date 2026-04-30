@@ -7,10 +7,10 @@ Single source of truth for all tests in this repository. Update the totals and p
 | Category | Count | Location |
 |---|---:|---|
 | Unit (pytest) | 74 | `test/unit/` |
-| Integration (pytest) | 0 | `test/integration/` |
+| Integration (pytest) | 4 | `test/integration/` |
 | Smoke (pytest) | 0 | `test/smoke/` |
 | Smoke (bats, docker image) | 20 | `docker/test/smoke/` |
-| **Total** | **94** | |
+| **Total** | **98** | |
 
 > Counts are `pytest --collect-only` items on a host without `yacs` / `torch`. Parametrised cases expand each function-def line into multiple test items (e.g. `test_naming.py`'s 5 functions yield 17 items). Inside the docker image two file-level skips lift (`test_tools.py`, `test_abstract_service.py`) and `test_services_utils.py`'s torch group runs, bringing the unit total to ~100.
 
@@ -55,10 +55,15 @@ Located at `test/unit/`. Imported via `test/conftest.py` which adds `src/` to `s
 | `runtime/utils/test_lazy_import.py` | 4 | `LazyModuleImporter` defers `importlib.import_module` until first attribute access; subsequent access does not re-import; works against real stdlib modules (`os.path`); constructor is no-op |
 | `runtime/services/test_services_utils.py` | 7 + 3 (torch skip) | `contains_var_keyword` / `get_var_keyword` over arg combinations; `torch_use_cuda` returns `cpu` / `cuda` per `USE_CUDA` env + `torch.cuda.is_available()` |
 | `runtime/services/test_abstract_service.py` | (auto-skip without `yacs`) | `ServiceFactory` registration via `__init_subclass__` / extra keywords / dup-check / unsupported-type / lookup miss; singleton + iter + contains protocol; `default_config` introspects `__init__` params (kwargs excluded); signature key extraction; `PathService` round-trip via YAML |
+| `api/test_backend.py` | (auto-skip without `yacs`) | `SegGPTBackend.infer()` calls reset/target/prompt in order; mode + class_id pass-through to Layer 1; refs/masks length-mismatch raises; latency > 0; gpu_mem zero on cpu; CUDA branch syncs + reads peak alloc; `service` property exposes Layer 1 |
 
 ## Integration (pytest)
 
-(none yet)
+Located at `test/integration/`. Requires the SegGPT ViT-Large checkpoint at `model/seggpt_vit_large.pth` and a CUDA-capable GPU; auto-skips otherwise.
+
+| File | Tests | Coverage |
+|---|---:|---|
+| `runtime/test_seggpt_backend_e2e.py` | 4 | hmbb fixtures end-to-end: returns expected output keys; predicted mask vs `expected/output_hmbb_3.png` mIoU > 0.9 (matches upstream's `tests/services/test_seggpt_service.py` bar); two consecutive `infer()` calls with same inputs return same mask (statelessness); refs/masks length-mismatch raises ValueError |
 
 ## Smoke (pytest)
 

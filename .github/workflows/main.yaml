@@ -22,6 +22,12 @@ jobs:
     with:
       image_name: seggpt
       context_path: docker
+      # The runtime stage is intentionally TODO until Layer 3 (FastAPI
+      # server) lands; the Dockerfile only declares sys / base / devel
+      # / test for now. Disable runtime build so CI does not try to
+      # resolve a missing `runtime` target. Flip back to default (true)
+      # in the same PR that uncomments the runtime stage.
+      build_runtime: false
 
   call-release:
     needs: call-docker-build
