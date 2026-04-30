@@ -185,30 +185,48 @@ RUN chown -R "${USER_NAME}":"${USER_GROUP}" "${CONDA_DIR}"
 ############################## devel ##############################
 FROM base AS devel
 
-ARG USER="${USER_NAME}"
-ARG GROUP="${USER_GROUP}"
+# Repeat the alias dance from sys/base — ARGs do not flow across stages
+# so each stage that references the user has to redeclare. Switching
+# everything below to USER_NAME / USER_GROUP avoids the previous
+# `${HOME}` substitution bug: $HOME is only populated at runtime (Docker
+# reads /etc/passwd when it processes the USER instruction at run time),
+# so any Dockerfile directive resolved at build time — WORKDIR, COPY
+# --chown, RUN-side `${HOME}` references — saw an empty $HOME and baked
+# `/work` instead of `/home/<user>/work`.
+ARG USER="user"
+ARG GROUP="user"
+ARG USER_NAME="${USER}"
+ARG USER_GROUP="${GROUP}"
 ARG ENTRYPOINT_FILE="script/entrypoint.sh"
 ARG CONFIG_DIR="/tmp/config"
 ARG CONFIG_SRC="config"
 
 COPY --chmod=0755 "./${ENTRYPOINT_FILE}" "/entrypoint.sh"
-COPY --chown="${USER}":"${GROUP}" "${CONFIG_SRC}" "${CONFIG_DIR}"
+COPY --chown="${USER_NAME}":"${USER_GROUP}" "${CONFIG_SRC}" "${CONFIG_DIR}"
 
-USER "${USER}"
+USER "${USER_NAME}"
 
 # config/pip/setup.sh is the downstream-extensible pip hook; SegGPT
 # heavy deps are pinned in base (above), so requirements.txt stays
 # empty unless the user adds project-local pip extras.
 RUN "${CONFIG_DIR}"/pip/setup.sh
 
-# Setup shell, terminator, tmux
-RUN cat "${CONFIG_DIR}"/shell/bashrc >> "${HOME}/.bashrc" && \
-    chown "${USER}":"${GROUP}" "${HOME}/.bashrc" && \
-    "${CONFIG_DIR}"/shell/terminator/setup.sh && \
+# Setup shell, terminator, tmux. /home/${USER_NAME} is a build-time
+# constant — safer than ${HOME} which is empty at build time even
+# though Docker populates it at run time.
+#
+# Pass ${USER_NAME} / ${USER_GROUP} explicitly to terminator's setup.sh:
+# the script reads $USER env when called without args, and the literal
+# string "user" leaks into $USER inside this RUN (likely BuildKit
+# coupling between `ARG USER="user"` and shell env). Explicit args
+# bypass the env lookup.
+RUN cat "${CONFIG_DIR}"/shell/bashrc >> "/home/${USER_NAME}/.bashrc" && \
+    chown "${USER_NAME}":"${USER_GROUP}" "/home/${USER_NAME}/.bashrc" && \
+    "${CONFIG_DIR}"/shell/terminator/setup.sh "${USER_NAME}" "${USER_GROUP}" && \
     "${CONFIG_DIR}"/shell/tmux/setup.sh && \
     sudo rm -rf "${CONFIG_DIR}"
 
-WORKDIR "${HOME}/work"
+WORKDIR "/home/${USER_NAME}/work"
 
 EXPOSE 22 8888
 
