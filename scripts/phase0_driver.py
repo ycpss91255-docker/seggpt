@@ -62,10 +62,25 @@ def _read_rgb(path: Path) -> np.ndarray:
 
 
 def _read_mask(path: Path) -> np.ndarray:
-    mask = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
-    if mask is None:
+    """Read a binary mask, recovering alpha-encoded RGBA exports.
+
+    GIMP / Photoshop / VGG annotator commonly save masks as RGBA where
+    R=G=B=0 and the alpha channel carries the mask. cv2.imread with
+    IMREAD_GRAYSCALE drops alpha and returns an all-black image, which
+    silently fed empty prompts to SegGPT. IMREAD_UNCHANGED keeps every
+    channel; we then pick whichever holds the signal:
+      RGBA -> alpha
+      BGR  -> standard grayscale conversion
+      single-channel -> as-is
+    """
+    img = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+    if img is None:
         raise FileNotFoundError(f"mask: {path}")
-    return mask
+    if img.ndim == 2:
+        return img
+    if img.shape[2] == 4:
+        return img[:, :, 3]
+    return cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
 
 def _miou(pred: np.ndarray, true: np.ndarray, eps: float = 1e-8) -> float:

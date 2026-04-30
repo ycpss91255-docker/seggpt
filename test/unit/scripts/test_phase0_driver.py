@@ -87,6 +87,52 @@ class TestResizeTo:
         assert set(np.unique(out).tolist()).issubset({0, 1})
 
 
+class TestReadMask:
+    """Lock the 3 mask-on-disk shapes _read_mask must accept.
+
+    Regression: GIMP-exported RGBA masks (R=G=B=0, alpha=mask) silently
+    decoded to all-zero under the old ``cv2.imread(IMREAD_GRAYSCALE)``
+    path because that codec drops alpha. Result was 96/96 empty SegGPT
+    predictions in a real Phase 0 run. Recover alpha when present.
+    """
+
+    def _write_and_read(self, driver, tmp_path, name, arr):
+        path = tmp_path / name
+        cv2.imwrite(str(path), arr)
+        return driver._read_mask(path)
+
+    def test_rgba_alpha_encoded_mask_recovers_alpha(self, driver, tmp_path):
+        # GIMP-style RGBA: R=G=B=0, alpha is the actual mask
+        h, w = 8, 8
+        rgba = np.zeros((h, w, 4), dtype=np.uint8)
+        rgba[2:5, 3:6, 3] = 255  # alpha-only foreground patch
+        out = self._write_and_read(driver, tmp_path, "rgba.png", rgba)
+        assert out.ndim == 2
+        assert out.shape == (h, w)
+        assert out[2:5, 3:6].all()
+        assert out.astype(bool).sum() == 9
+
+    def test_bgr_three_channel_mask_grayscale_converted(self, driver, tmp_path):
+        # Hmbb-style RGB mask (no alpha): BGR -> grayscale conversion path
+        h, w = 8, 8
+        bgr = np.zeros((h, w, 3), dtype=np.uint8)
+        bgr[1:3, 1:3, :] = 255  # white square
+        out = self._write_and_read(driver, tmp_path, "bgr.png", bgr)
+        assert out.ndim == 2
+        assert out.shape == (h, w)
+        assert out[1:3, 1:3].all()
+
+    def test_single_channel_grayscale_passthrough(self, driver, tmp_path):
+        # Already grayscale: return as-is, no conversion
+        h, w = 8, 8
+        gray = np.zeros((h, w), dtype=np.uint8)
+        gray[4:6, 4:6] = 200
+        out = self._write_and_read(driver, tmp_path, "gray.png", gray)
+        assert out.ndim == 2
+        assert out.shape == (h, w)
+        assert (out[4:6, 4:6] == 200).all()
+
+
 class TestNSubsetsAreSubsetsOfPool:
     """Sanity: every preset N must be drawable from prompt_01..08."""
 
