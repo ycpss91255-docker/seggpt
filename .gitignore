@@ -216,3 +216,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Model weights
+#
+# Distribute via NAS / object storage / direct download from BAAI's
+# SegGPT release; never commit the binary into git (1.48 GB for the
+# ViT-Large checkpoint alone).
+model/*.pth
+model/*.bin
+model/*.safetensors

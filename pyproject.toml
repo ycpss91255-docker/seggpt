@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "seggpt"
+version = "0.0.0"
+description = "SegGPT visual prompt segmentation backend (raw inference, three-layer architecture)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "GPL-3.0-or-later" }
+authors = [
+  { name = "cyc", email = "ycpss91255@gmail.com" },
+]
+keywords = ["segmentation", "seggpt", "visual-prompt", "few-shot"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Scientific/Engineering :: Image Recognition",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["seggpt*"]
+namespaces = false
+
+[tool.pytest.ini_options]
+testpaths = ["test"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-ra"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "S", "BLE", "C4", "SIM", "RET"]
+ignore = ["S101"]  # allow assert in tests
+
+[tool.ruff.lint.per-file-ignores]
+"test/**/*.py" = ["S", "BLE"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_unused_ignores = true
+warn_return_any = true
