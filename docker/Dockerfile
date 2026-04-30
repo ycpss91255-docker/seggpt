@@ -173,7 +173,14 @@ RUN pip install --no-cache-dir \
 # container don't need sudo.
 RUN chown -R "${USER_NAME}":"${USER_GROUP}" "${CONDA_DIR}"
 
-ENV LD_LIBRARY_PATH="${CONDA_DIR}/lib:${LD_LIBRARY_PATH:-}"
+# Note: LD_LIBRARY_PATH is intentionally not set here. Conda's libs
+# carry an rpath that resolves the runtime CUDA / cuDNN dependencies
+# without needing the env var, and prepending /opt/conda/lib globally
+# made bash pick up conda's libtinfow.so.6.4 (no version stamp) over
+# the system's libtinfo.so.6.3, producing a noisy
+# `no version information available` warning on every shell start.
+# torch + torchvision + torchaudio + opencv all import correctly with
+# the env var unset (verified: torch 2.0.1, cuda 11.8, cudnn 8700).
 
 ############################## devel ##############################
 FROM base AS devel

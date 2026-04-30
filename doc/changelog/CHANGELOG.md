@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Phase 0 CLI**: `scripts/phase0.py` — runs end-to-end inference, emits a JSON record (latency / gpu_mem / mIoU). Defaults to in-repo hmbb fixtures so a no-arg invocation smoke-tests the full pipeline; CLI flags swap in real-prompt scenes.
 - `model/` directory: ships the SegGPT ViT-Large architecture YAML; `.gitignore` blocks `*.pth` / `*.bin` / `*.safetensors` so the 1.48 GB checkpoint stays out of git. `model/README.md` documents provenance + expected layout.
 - `test/assets/hmbb/` fixtures (3 reference images + 3 masks) and `test/assets/expected/output_hmbb_3.png` for the regression mIoU bar.
+- Entrypoint auto-runs `pip install --no-deps -e ${HOME}/work` on container start so `from seggpt.api import SegGPTBackend` works without the user having to remember the editable install. Idempotent: a working install just re-registers in ~5 sec. Workaround for template's hardcoded `context: .` (build context = `docker/`) — `src/` and `pyproject.toml` at repo root are outside, so build-time install is not currently feasible. Issue to upstream `setup.conf [build] context` will replace this with a build-time install.
+- Phase 0 docs (`doc/phase0-runbook.md` + `doc/phase0-test-flow.md`) committed to git as the canonical source. Notion mirrors live under `SegGPT 評估計畫（Phase 0）`; markdown headers link to the Notion pages.
 
 ### Changed
 
@@ -35,3 +37,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Dockerfile USER vs USER_NAME ARG mismatch with template's CI build-args. CI passes short forms (`USER=ci`, `GROUP=ci`, `UID=1000`, `GID=1000`) while compose.yaml passes long forms (`USER_NAME` etc.). Both forms are now declared in the sys + base stages with long forms defaulting to short, so `useradd` creates the correct user under both flows. Filed as template#198 for upstream resolution.
+- `bash: /opt/conda/lib/libtinfo.so.6: no version information available` warning on every shell start. Caused by `ENV LD_LIBRARY_PATH=/opt/conda/lib:...` shoving conda's `libtinfow.so.6.4` (no version stamp) ahead of the system's `libtinfo.so.6.3` for bash's terminal handling. Dropped the env var entirely — torch / torchvision / torchaudio / opencv / cudnn (8700) all import correctly without it because conda's binaries carry an rpath that resolves CUDA libs without LD_LIBRARY_PATH. Verified inside the rebuilt image.
