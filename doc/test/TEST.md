@@ -9,8 +9,8 @@ Single source of truth for all tests in this repository. Update the totals and p
 | Unit (pytest) | 74 | `test/unit/` |
 | Integration (pytest) | 4 | `test/integration/` |
 | Smoke (pytest) | 0 | `test/smoke/` |
-| Smoke (bats, docker image) | 20 | `docker/test/smoke/` |
-| **Total** | **98** | |
+| Smoke (bats, docker image) | 22 | `docker/test/smoke/` |
+| **Total** | **100** | |
 
 > Counts are `pytest --collect-only` items on a host without `yacs` / `torch`. Parametrised cases expand each function-def line into multiple test items (e.g. `test_naming.py`'s 5 functions yield 17 items). Inside the docker image two file-level skips lift (`test_tools.py`, `test_abstract_service.py`) and `test_services_utils.py`'s torch group runs, bringing the unit total to ~100.
 
@@ -40,6 +40,8 @@ Located at `docker/test/smoke/seggpt_env.bats`. Exercises the `devel` image buil
 | 18 | `detectron2 imports as v0.6` | `detectron2.__version__` 0.6 |
 | 19 | `CUDA_HOME points to /usr/local/cuda-11.8` | env var equals `/usr/local/cuda-11.8` |
 | 20 | `TORCH_CUDA_ARCH_LIST includes Ampere (8.6)` | env var contains `8.6` |
+| 21 | `seggpt package installed editable into the image` | `pip show seggpt` reports an Editable project location (build-time install via `repo_root` named context) |
+| 22 | `from seggpt.api import SegGPTBackend resolves without runtime install` | `python -c "from seggpt.api import SegGPTBackend"` succeeds without any entrypoint-side `pip install` |
 
 ## Unit (pytest)
 

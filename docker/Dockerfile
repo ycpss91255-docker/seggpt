@@ -226,6 +226,24 @@ RUN cat "${CONFIG_DIR}"/shell/bashrc >> "/home/${USER_NAME}/.bashrc" && \
     "${CONFIG_DIR}"/shell/tmux/setup.sh && \
     sudo rm -rf "${CONFIG_DIR}"
 
+# Build-time editable install of the seggpt package. Pulled from the
+# `repo_root` named context (defined in setup.conf [additional_contexts]
+# as `..`, available since template v0.16.0) — the main build context
+# is `docker/`, which can't see pyproject.toml + src/ at the repo root
+# without this. pip --no-deps because heavy deps already locked above.
+#
+# install path /home/${USER_NAME}/work matches setup.conf's mount_1
+# target, so the editable install's egg-link / .pth pointers stay
+# valid after the host bind-mount overlays this directory at run
+# time (host repo has identical layout). Edits on the host reflect
+# in the container without re-installing.
+COPY --from=repo_root --chown="${USER_NAME}":"${USER_GROUP}" \
+    pyproject.toml LICENSE README.md /home/${USER_NAME}/work/
+COPY --from=repo_root --chown="${USER_NAME}":"${USER_GROUP}" \
+    src /home/${USER_NAME}/work/src
+
+RUN pip install --quiet --no-cache-dir --no-deps -e "/home/${USER_NAME}/work"
+
 WORKDIR "/home/${USER_NAME}/work"
 
 EXPOSE 22 8888
