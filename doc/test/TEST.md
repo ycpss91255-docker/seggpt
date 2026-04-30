@@ -6,13 +6,13 @@ Single source of truth for all tests in this repository. Update the totals and p
 
 | Category | Count | Location |
 |---|---:|---|
-| Unit (pytest) | 60 | `test/unit/` |
+| Unit (pytest) | 74 | `test/unit/` |
 | Integration (pytest) | 0 | `test/integration/` |
 | Smoke (pytest) | 0 | `test/smoke/` |
 | Smoke (bats, docker image) | 20 | `docker/test/smoke/` |
-| **Total** | **80** | |
+| **Total** | **94** | |
 
-> One additional `test_tools.py` group is auto-skipped on hosts without the `yacs` package (`pytest.importorskip`); inside the docker image it runs and brings the unit total to ~74. Counts here track only what runs unconditionally on a host.
+> Counts are `pytest --collect-only` items on a host without `yacs` / `torch`. Parametrised cases expand each function-def line into multiple test items (e.g. `test_naming.py`'s 5 functions yield 17 items). Inside the docker image two file-level skips lift (`test_tools.py`, `test_abstract_service.py`) and `test_services_utils.py`'s torch group runs, bringing the unit total to ~100.
 
 ## Smoke (bats, docker image)
 
@@ -52,6 +52,9 @@ Located at `test/unit/`. Imported via `test/conftest.py` which adds `src/` to `s
 | `runtime/utils/test_environment_variables.py` | 25 | `EnvironmentVariable` registry / get-set / type coercion / double-registration error; `BooleanEnvironmentVariable` truthy/falsy strings / non-bool default rejection / int-form persistence; `PathEnvironmentVariable` is_dir create-on-get / file-mode skip-create; `USE_CUDA` / `GSI_HOME` singletons |
 | `runtime/utils/test_logger.py` | 7 | level wrappers route to `seggpt.runtime` logger at correct level; non-string payloads pass through |
 | `runtime/utils/test_tools.py` | (auto-skip without `yacs`) | `check_path` GSI_HOME fallback / FileNotFoundError; `path_with_home` absolute / relative; `load_yaml` yacs-vs-dict round-trip; safe_load lockdown (rejects `!!python/object`) |
+| `runtime/utils/test_lazy_import.py` | 4 | `LazyModuleImporter` defers `importlib.import_module` until first attribute access; subsequent access does not re-import; works against real stdlib modules (`os.path`); constructor is no-op |
+| `runtime/services/test_services_utils.py` | 7 + 3 (torch skip) | `contains_var_keyword` / `get_var_keyword` over arg combinations; `torch_use_cuda` returns `cpu` / `cuda` per `USE_CUDA` env + `torch.cuda.is_available()` |
+| `runtime/services/test_abstract_service.py` | (auto-skip without `yacs`) | `ServiceFactory` registration via `__init_subclass__` / extra keywords / dup-check / unsupported-type / lookup miss; singleton + iter + contains protocol; `default_config` introspects `__init__` params (kwargs excluded); signature key extraction; `PathService` round-trip via YAML |
 
 ## Integration (pytest)
 
