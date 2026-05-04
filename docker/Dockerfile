@@ -290,6 +290,17 @@ COPY test/smoke/ /smoke_test/
 
 ARG USER="user"
 ARG USER_NAME="${USER}"
+# bats smoke tests read ${USER} as a shell env var, not as the Docker
+# USER directive. BuildKit leaks the ARG default ("user") into the shell
+# env (see comment at the devel-stage USER block) — under v0.15.0 this
+# was harmless because build-worker.yaml also passed `USER=ci`, so the
+# leaked env coincidentally matched. v0.16.1 dropped that short-form
+# build-arg (template#198), so the leaked env stayed as the literal
+# default "user" while /opt/conda was chowned to USER_NAME="ci",
+# breaking `assert_file_owned_by "${USER}" /opt/conda` (test 33). Pin
+# USER env to the resolved long-form name so the smoke contract stays
+# stable regardless of which build-arg shape the caller uses.
+ENV USER="${USER_NAME}"
 USER "${USER_NAME}"
 
 RUN bats /smoke_test/
