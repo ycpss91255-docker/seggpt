@@ -7,6 +7,16 @@
 #   failure_threshold float       mIoU below this copies the case to failures/
 #   overlay_color     [B, G, R]   tint blended over the predicted mask
 #   overlay_alpha     float       0.0 = invisible, 1.0 = opaque tint
+#   no_gt             bool        skip mIoU / failures / pass_rate (visual + latency only)
+
+# GT mIoU / pass-rate evaluation disabled by default — annotated targets are
+# not yet available for the iron_beam x small_target sub-flow (every visible
+# pallet would have to be labelled to fairly score raw SegGPT output, which
+# the existing application-layer-style "middle pallet only" GT does not do).
+# Driver still emits predictions/N<n>/<stem>/{target,pred,overlay}.png +
+# per_image_N<n>.csv (latency / gpu_mem / mask_positive_pixels) for visual
+# triage. Flip to `false` (or remove this line) once GT lands.
+no_gt: true
 
 n_values: [1, 4, 8]
 mode: instance

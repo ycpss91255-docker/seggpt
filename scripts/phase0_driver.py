@@ -53,6 +53,7 @@ _DRIVER_CONFIG_KEYS = {
     "failure_threshold",
     "overlay_color",
     "overlay_alpha",
+    "no_gt",
 }
 
 # Diversity-ordered subsets indexed by prompt number (1..8).
