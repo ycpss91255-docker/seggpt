@@ -361,6 +361,13 @@ class TestLoadDriverYaml:
         with pytest.raises(SystemExit):
             driver._load_driver_yaml(path)
 
+    def test_no_gt_yaml_override(self, driver, tmp_path):
+        # `no_gt: true` is the default in the shipped YAML (annotated GT
+        # targets are not yet available); loader must accept the bool.
+        path = self._write(tmp_path, "no_gt: true\n")
+        out = driver._load_driver_yaml(path)
+        assert out == {"no_gt": True}
+
 
 class TestRepoYamlIsSelfConsistent:
     """The shipped config/phase0_driver.yaml must round-trip through the loader."""

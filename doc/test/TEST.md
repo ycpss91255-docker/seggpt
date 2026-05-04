@@ -6,11 +6,11 @@ Single source of truth for all tests in this repository. Update the totals and p
 
 | Category | Count | Location |
 |---|---:|---|
-| Unit (pytest) | 113 | `test/unit/` |
+| Unit (pytest) | 114 | `test/unit/` |
 | Integration (pytest) | 4 | `test/integration/` |
 | Smoke (pytest) | 0 | `test/smoke/` |
 | Smoke (bats, docker image) | 22 | `docker/test/smoke/` |
-| **Total** | **139** | |
+| **Total** | **140** | |
 
 > Counts are `pytest --collect-only` items on a host without `yacs` / `torch`. Parametrised cases expand each function-def line into multiple test items (e.g. `test_naming.py`'s 5 functions yield 17 items). Inside the docker image two file-level skips lift (`test_tools.py`, `test_abstract_service.py`) and `test_services_utils.py`'s torch group runs, bringing the unit total to ~100.
 
@@ -58,7 +58,7 @@ Located at `test/unit/`. Imported via `test/conftest.py` which adds `src/` to `s
 | `runtime/services/test_services_utils.py` | 7 + 3 (torch skip) | `contains_var_keyword` / `get_var_keyword` over arg combinations; `torch_use_cuda` returns `cpu` / `cuda` per `USE_CUDA` env + `torch.cuda.is_available()` |
 | `runtime/services/test_abstract_service.py` | (auto-skip without `yacs`) | `ServiceFactory` registration via `__init_subclass__` / extra keywords / dup-check / unsupported-type / lookup miss; singleton + iter + contains protocol; `default_config` introspects `__init__` params (kwargs excluded); signature key extraction; `PathService` round-trip via YAML |
 | `api/test_backend.py` | (auto-skip without `yacs`) | `SegGPTBackend.infer()` calls reset/target/prompt in order; mode + class_id pass-through to Layer 1; refs/masks length-mismatch raises; latency > 0; gpu_mem zero on cpu; CUDA branch syncs + reads peak alloc; `service` property exposes Layer 1 |
-| `scripts/test_phase0_driver.py` | 39 | `_miou` over identical / disjoint / 1/3-overlap / 0-vs-255 nonzero-foreground / both-empty (eps); `_resize_to` identity on shape-match, doubles via nearest-neighbor, keeps binary {0,1}; `_read_mask` recovers alpha-encoded RGBA / converts 3-channel BGR / passes single-channel grayscale / auto-inverts white-bg+black-fg in 3ch and grayscale / falls back to BGR when RGBA alpha is uniform; `_apply_overlay` only-mask-pixels-change / alpha=1 pure tint / alpha=0 unchanged / mismatched mask resizes via nearest; `_parse_bgr` valid / wrong-count / out-of-range / non-int rejected; `_N_SUBSETS` within prompt_01..08 + no duplicates; `_pass_stats` empty / all-pass / all-fail / threshold-inclusive / mixed-rate / pass+fail=total invariant; `_load_driver_yaml` missing-file / empty / valid-roundtrip / overlay_color list-to-tuple / unknown-key / wrong-length / non-list / non-mapping rejected; shipped `config/phase0_driver.yaml` round-trips through loader |
+| `scripts/test_phase0_driver.py` | 40 | `_miou` over identical / disjoint / 1/3-overlap / 0-vs-255 nonzero-foreground / both-empty (eps); `_resize_to` identity on shape-match, doubles via nearest-neighbor, keeps binary {0,1}; `_read_mask` recovers alpha-encoded RGBA / converts 3-channel BGR / passes single-channel grayscale / auto-inverts white-bg+black-fg in 3ch and grayscale / falls back to BGR when RGBA alpha is uniform; `_apply_overlay` only-mask-pixels-change / alpha=1 pure tint / alpha=0 unchanged / mismatched mask resizes via nearest; `_parse_bgr` valid / wrong-count / out-of-range / non-int rejected; `_N_SUBSETS` within prompt_01..08 + no duplicates; `_pass_stats` empty / all-pass / all-fail / threshold-inclusive / mixed-rate / pass+fail=total invariant; `_load_driver_yaml` missing-file / empty / valid-roundtrip / overlay_color list-to-tuple / unknown-key / wrong-length / non-list / non-mapping rejected; shipped `config/phase0_driver.yaml` round-trips through loader |
 
 ## Integration (pytest)
 

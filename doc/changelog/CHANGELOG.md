@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `phase0_driver` defaults to `no_gt: true` via `config/phase0_driver.yaml`. Annotated GT for the iron_beam x small_target sub-flow is not yet available — every visible pallet would have to be labelled to fairly score raw SegGPT output, which the existing application-layer-style "middle pallet only" GT does not do. Driver still emits `predictions/N<n>/<stem>/{target,pred,overlay}.png` + `per_image_N<n>.csv` (latency / gpu_mem / mask_positive_pixels) for visual + latency inspection; `failures/`, mIoU columns / stats, pass-rate stats, and the N=8 mIoU/pass gates in `SUMMARY.md` are all skipped under this default. Flip back by editing the YAML (`no_gt: false` or remove the line). `no_gt` is now part of the YAML whitelist (`_DRIVER_CONFIG_KEYS`), locked by 1 unit test (`TestLoadDriverYaml.test_no_gt_yaml_override`).
+
 ### Added
 
 - Initial repository scaffold with three-layer architecture skeleton (Layer 1 `src/runtime/`, Layer 2 `src/api/`, Layer 3 `src/server/`).
