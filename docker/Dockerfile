@@ -288,8 +288,9 @@ ENV BATS_LIB_PATH="/usr/lib/bats"
 COPY template/test/smoke/ /smoke_test/
 COPY test/smoke/ /smoke_test/
 
-ARG USER
-USER "${USER}"
+ARG USER="user"
+ARG USER_NAME="${USER}"
+USER "${USER_NAME}"
 
 RUN bats /smoke_test/
 
