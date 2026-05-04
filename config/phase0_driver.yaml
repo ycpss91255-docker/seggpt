@@ -1,0 +1,15 @@
+# Phase 0 driver overrides. Picked up automatically by
+# scripts/phase0_driver.py from this path; CLI flags still win
+# over any value set here. Keys not present fall back to the
+# hardcoded defaults inside the script. Allowed keys:
+#   n_values          list[int]   prompt-count sweep, must be subset of _N_SUBSETS
+#   mode              str         "instance" | "semantic"
+#   failure_threshold float       mIoU below this copies the case to failures/
+#   overlay_color     [B, G, R]   tint blended over the predicted mask
+#   overlay_alpha     float       0.0 = invisible, 1.0 = opaque tint
+
+n_values: [1, 4, 8]
+mode: instance
+failure_threshold: 0.5
+overlay_color: [0, 0, 0]   # black
+overlay_alpha: 0.5
