@@ -113,3 +113,23 @@ setup() {
 @test "TORCH_CUDA_ARCH_LIST includes Ampere (8.6)" {
   echo "${TORCH_CUDA_ARCH_LIST}" | grep -q "8.6"
 }
+
+# -------------------- build-time editable install --------------------
+#
+# Locks down the v0.16.0 + additional_contexts pivot: the seggpt
+# package is installed --editable into the image at build time, so
+# `from seggpt.api import SegGPTBackend` resolves without any
+# entrypoint-side `pip install`. If this regresses, the smoke fail
+# pinpoints the build-time install (rather than runtime mount).
+
+@test "seggpt package installed editable into the image" {
+  run pip show seggpt
+  assert_success
+  assert_line --partial "Editable project location"
+}
+
+@test "from seggpt.api import SegGPTBackend resolves without runtime install" {
+  run python -c "from seggpt.api import SegGPTBackend; print(SegGPTBackend.__name__)"
+  assert_success
+  assert_line --partial "SegGPTBackend"
+}

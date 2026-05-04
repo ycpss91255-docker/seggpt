@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   call-docker-build:
-    uses: ycpss91255-docker/template/.github/workflows/build-worker.yaml@v0.15.0
+    uses: ycpss91255-docker/template/.github/workflows/build-worker.yaml@v0.16.1
     with:
       image_name: seggpt
       context_path: docker
@@ -28,10 +28,20 @@ jobs:
       # resolve a missing `runtime` target. Flip back to default (true)
       # in the same PR that uncomments the runtime stage.
       build_runtime: false
+      # Mirror docker/setup.conf [additional_contexts] context_1=repo_root=..
+      # for CI. Note the asymmetric form (`.` here vs `..` in setup.conf):
+      # build-worker resolves paths relative to the repo root (actions/checkout
+      # working dir), not to context_path; compose resolves relative to
+      # compose.yaml, which lives inside docker/. Same destination, different
+      # base. Without this the Dockerfile's `COPY --from=repo_root` lines fail
+      # with "no source for 'repo_root'" in CI even though local ./build.sh
+      # works (compose path). See template@v0.16.1 / template#207.
+      build_contexts: |
+        repo_root=.
 
   call-release:
     needs: call-docker-build
     if: startsWith(github.ref, 'refs/tags/')
-    uses: ycpss91255-docker/template/.github/workflows/release-worker.yaml@v0.15.0
+    uses: ycpss91255-docker/template/.github/workflows/release-worker.yaml@v0.16.1
     with:
       archive_name_prefix: seggpt

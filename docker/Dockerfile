@@ -226,6 +226,24 @@ RUN cat "${CONFIG_DIR}"/shell/bashrc >> "/home/${USER_NAME}/.bashrc" && \
     "${CONFIG_DIR}"/shell/tmux/setup.sh && \
     sudo rm -rf "${CONFIG_DIR}"
 
+# Build-time editable install of the seggpt package. Pulled from the
+# `repo_root` named context (defined in setup.conf [additional_contexts]
+# as `..`, available since template v0.16.0) — the main build context
+# is `docker/`, which can't see pyproject.toml + src/ at the repo root
+# without this. pip --no-deps because heavy deps already locked above.
+#
+# install path /home/${USER_NAME}/work matches setup.conf's mount_1
+# target, so the editable install's egg-link / .pth pointers stay
+# valid after the host bind-mount overlays this directory at run
+# time (host repo has identical layout). Edits on the host reflect
+# in the container without re-installing.
+COPY --from=repo_root --chown="${USER_NAME}":"${USER_GROUP}" \
+    pyproject.toml LICENSE README.md /home/${USER_NAME}/work/
+COPY --from=repo_root --chown="${USER_NAME}":"${USER_GROUP}" \
+    src /home/${USER_NAME}/work/src
+
+RUN pip install --quiet --no-cache-dir --no-deps -e "/home/${USER_NAME}/work"
+
 WORKDIR "/home/${USER_NAME}/work"
 
 EXPOSE 22 8888
@@ -270,8 +288,20 @@ ENV BATS_LIB_PATH="/usr/lib/bats"
 COPY template/test/smoke/ /smoke_test/
 COPY test/smoke/ /smoke_test/
 
-ARG USER
-USER "${USER}"
+ARG USER="user"
+ARG USER_NAME="${USER}"
+# bats smoke tests read ${USER} as a shell env var, not as the Docker
+# USER directive. BuildKit leaks the ARG default ("user") into the shell
+# env (see comment at the devel-stage USER block) — under v0.15.0 this
+# was harmless because build-worker.yaml also passed `USER=ci`, so the
+# leaked env coincidentally matched. v0.16.1 dropped that short-form
+# build-arg (template#198), so the leaked env stayed as the literal
+# default "user" while /opt/conda was chowned to USER_NAME="ci",
+# breaking `assert_file_owned_by "${USER}" /opt/conda` (test 33). Pin
+# USER env to the resolved long-form name so the smoke contract stays
+# stable regardless of which build-arg shape the caller uses.
+ENV USER="${USER_NAME}"
+USER "${USER_NAME}"
 
 RUN bats /smoke_test/
 
