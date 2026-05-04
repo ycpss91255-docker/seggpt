@@ -2,17 +2,25 @@
 """Phase 0 sub-flow driver — sweep targets × N, write run dir.
 
 For each (target, N) pair:
-  - pick N prompts from pool by diversity-ordered subset
+  - pick the first N prompts (``prompt_01 .. prompt_0N``) from prompts-dir
   - run ``SegGPTBackend.infer()`` (model loaded once)
-  - compute mIoU vs ``<gt-dir>/<target-filename>`` (if available)
-  - save pred mask, copy failures (mIoU < threshold)
+  - emit target original + overlay PNGs for visual inspection
 
 Outputs ``<run-dir-base>/<run-name>/``:
-  meta.json, per_image.csv, stats.json, n_sweep.csv,
-  pred_masks/<stem>_N<n>.png, failures/<stem>_N<n>/{target,pred,gt}.png,
-  SUMMARY.md
+  meta.json, per_image_N<n>.csv, stats.json, n_sweep.csv, SUMMARY.md,
+  N<n>/<target_stem>.png + <target_stem>_overlay.png
 
-Defaults: ``phase_0_test/{iron_beam_prompt,small_target,ground_truth}/``.
+Workflow: prompts-dir is meant to be a symlink (``ln -sfn``) re-pointed
+at whichever prompt set you want to evaluate. Each run writes a fresh
+timestamped sub-dir under ``output/`` so swap-and-rerun keeps prior
+results intact for side-by-side comparison.
+
+GT mIoU / failures / pass-rate are gated by ``no_gt`` in the driver
+YAML — default ``true`` until annotated GT lands. With no_gt the driver
+emits only latency / GPU-mem stats.
+
+Defaults: ``data/phase_0_test/{prompt,target,ground_truth}/``
+(``prompt`` and ``target`` are typically symlinks managed by ``ln -sfn``).
 """
 from __future__ import annotations
 
@@ -34,8 +42,11 @@ _REPO = Path(__file__).resolve().parent.parent
 # repo being mounted at ~/work, kept out of the backend repo to honour
 # "SegGPT Backend Repo (職責邊界)" generic-reuse rule.
 _DEFAULT_DATA = _REPO / "data" / "phase_0_test"
-_DEFAULT_PROMPTS = _DEFAULT_DATA / "iron_beam_prompt"
-_DEFAULT_TARGETS = _DEFAULT_DATA / "small_target"
+# `prompt` is meant to be a symlink (`ln -sfn <prompt_set> prompt`)
+# re-pointed before each run; the driver reads `prompt_01..prompt_08`
+# from whatever the symlink resolves to right now.
+_DEFAULT_PROMPTS = _DEFAULT_DATA / "prompt"
+_DEFAULT_TARGETS = _DEFAULT_DATA / "target"
 _DEFAULT_GTS = _DEFAULT_DATA / "ground_truth"
 _DEFAULT_MODEL = _REPO / "model" / "seggpt_vit_large.pth"
 _DEFAULT_CONFIG = _REPO / "model" / "seggpt_vit_large.yaml"
@@ -50,24 +61,21 @@ _DEFAULT_DRIVER_CONFIG = _REPO / "config" / "phase0_driver.yaml"
 _DRIVER_CONFIG_KEYS = {
     "n_values",
     "mode",
-    "failure_threshold",
     "overlay_color",
     "overlay_alpha",
     "no_gt",
 }
 
-# Diversity-ordered subsets indexed by prompt number (1..8).
-# Source: phase_0_test/iron_beam_prompt/README.md.
-#   01 純鐵 baseline   02 高解析+label   03 橘+綠
-#   04 純綠            05 純橘            06 空棧板
-#   07 強反光 hard     08 三色齊全
+# N=k uses prompt_01..prompt_0k. The current workflow is to rotate
+# `prompts_dir` itself via `ln -sfn`, so any "diversity-ordered subset"
+# selection logic would conflict with the user's hand-curated ordering
+# inside the symlinked set — the symlink target IS the ordering.
 _N_SUBSETS: Dict[int, List[int]] = {
-    1: [1],                        # pure iron baseline
-    4: [1, 4, 5, 7],               # iron + green + orange + reflection
-    8: [1, 2, 3, 4, 5, 6, 7, 8],   # full pool
+    1: [1],
+    2: [1, 2],
+    4: [1, 2, 3, 4],
+    8: [1, 2, 3, 4, 5, 6, 7, 8],
 }
-
-_FailureThreshold = 0.5
 
 
 def _read_rgb(path: Path) -> np.ndarray:
@@ -118,23 +126,6 @@ def _miou(pred: np.ndarray, true: np.ndarray, eps: float = 1e-8) -> float:
     inter = np.logical_and(pred_b, true_b).sum()
     union = np.logical_or(pred_b, true_b).sum()
     return float(inter) / float(union + eps)
-
-
-def _pass_stats(mious: List[float], threshold: float) -> Dict[str, float]:
-    """Pass = mIoU >= threshold. Mirrors the failure-copy condition in main()
-    (`miou < threshold` -> copied to failures/), so pass_count + fail_count
-    always equals total. Returns dict with int counts + float pass_rate in [0,1].
-    """
-    total = len(mious)
-    if total == 0:
-        return {"total": 0, "pass_count": 0, "fail_count": 0, "pass_rate": 0.0}
-    pass_count = int(sum(1 for v in mious if v >= threshold))
-    return {
-        "total": total,
-        "pass_count": pass_count,
-        "fail_count": total - pass_count,
-        "pass_rate": pass_count / total,
-    }
 
 
 def _resize_to(pred: np.ndarray, shape_hw: Tuple[int, int]) -> np.ndarray:
@@ -253,8 +244,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--driver-config",
         type=Path,
         default=_DEFAULT_DRIVER_CONFIG,
-        help="YAML override file (n_values / mode / failure_threshold / "
-        "overlay_color / overlay_alpha). CLI flags win over YAML. "
+        help="YAML override file (n_values / mode / overlay_color / "
+        "overlay_alpha / no_gt). CLI flags win over YAML. "
         "Default %(default)s.",
     )
     parser.add_argument("--prompts-dir", type=Path, default=_DEFAULT_PROMPTS)
@@ -266,21 +257,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "--run-name",
         type=str,
         default=None,
-        help="Output dir basename. Default: <YYYY-MM-DD_HHMM>_iron_beam_small_target.",
+        help="Output dir basename. Default: <YYYY-MM-DD_HHMM>.",
     )
     parser.add_argument(
         "--run-dir-base",
         type=Path,
-        default=_REPO / "phase0_runs",
+        default=_REPO / "output",
     )
-    parser.add_argument("--n-values", type=int, nargs="+", default=[1, 4, 8])
+    parser.add_argument("--n-values", type=int, nargs="+", default=[1, 2, 4, 8])
     parser.add_argument("--mode", choices=("instance", "semantic"), default="instance")
-    parser.add_argument(
-        "--failure-threshold",
-        type=float,
-        default=_FailureThreshold,
-        help="mIoU below this copies target/pred/gt to failures/.",
-    )
     parser.add_argument(
         "--no-gt",
         action="store_true",
@@ -318,13 +303,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     args = parser.parse_args(argv)
 
-    run_name = args.run_name or (
-        datetime.now().strftime("%Y-%m-%d_%H%M") + "_iron_beam_small_target"
-    )
+    run_name = args.run_name or datetime.now().strftime("%Y-%m-%d_%H%M")
     run_dir = args.run_dir_base / run_name
-    (run_dir / "predictions").mkdir(parents=True, exist_ok=True)
-    if not args.no_gt:
-        (run_dir / "failures").mkdir(parents=True, exist_ok=True)
+    run_dir.mkdir(parents=True, exist_ok=True)
 
     prompt_pairs = _index_prompts(args.prompts_dir)
     for n in args.n_values:
@@ -365,7 +346,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "n_subsets": {n: _N_SUBSETS[n] for n in args.n_values},
         "n_targets": len(targets),
         "mode": args.mode,
-        "failure_threshold": args.failure_threshold,
+        "no_gt": bool(args.no_gt),
         "overlay_color_bgr": list(args.overlay_color),
         "overlay_alpha": args.overlay_alpha,
     }
@@ -404,31 +385,19 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "mask_positive_pixels": int(pred_first.astype(bool).sum()),
             }
 
-            pred_dir = run_dir / "predictions" / f"N{n}" / tgt_path.stem
-            pred_dir.mkdir(parents=True, exist_ok=True)
+            n_dir = run_dir / f"N{n}"
+            n_dir.mkdir(parents=True, exist_ok=True)
             target_bgr = cv2.imread(str(tgt_path))
             mask_bool = pred_first.astype(bool)
-            mask_bin = (mask_bool * 255).astype(np.uint8)
             overlay = _apply_overlay(
                 target_bgr, mask_bool, args.overlay_color, args.overlay_alpha
             )
-            cv2.imwrite(str(pred_dir / "target.png"), target_bgr)
-            cv2.imwrite(str(pred_dir / "pred.png"), mask_bin)
-            cv2.imwrite(str(pred_dir / "overlay.png"), overlay)
+            cv2.imwrite(str(n_dir / f"{tgt_path.stem}.png"), target_bgr)
+            cv2.imwrite(str(n_dir / f"{tgt_path.stem}_overlay.png"), overlay)
 
             if gt_mask is not None:
                 pred_for_iou = _resize_to(pred_first, gt_mask.shape)
                 row["miou"] = round(_miou(pred_for_iou, gt_mask), 4)
-
-                if row["miou"] < args.failure_threshold:
-                    fail_dir = run_dir / "failures" / f"N{n}" / tgt_path.stem
-                    fail_dir.mkdir(parents=True, exist_ok=True)
-                    cv2.imwrite(str(fail_dir / "target.png"), cv2.imread(str(tgt_path)))
-                    cv2.imwrite(
-                        str(fail_dir / "pred.png"),
-                        (pred_for_iou.astype(bool) * 255).astype(np.uint8),
-                    )
-                    cv2.imwrite(str(fail_dir / "gt.png"), gt_mask)
 
             rows.append(row)
 
@@ -466,8 +435,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             ),
         }
         if not args.no_gt:
-            iou_list = [r["miou"] for r in rows_n]
-            iou = np.array(iou_list)
+            iou = np.array([r["miou"] for r in rows_n])
             s["miou"] = {
                 "mean": float(np.mean(iou)),
                 "median": float(np.median(iou)),
@@ -475,8 +443,6 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "p90": float(np.percentile(iou, 90)),
                 "std": float(np.std(iou)),
             }
-            s["pass"] = _pass_stats(iou_list, args.failure_threshold)
-            s["pass"]["threshold"] = args.failure_threshold
         stats[f"N={n}"] = s
     (run_dir / "stats.json").write_text(json.dumps(stats, indent=2))
 
@@ -484,25 +450,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         writer = csv.writer(f)
         cols = ["N", "median_latency_ms", "peak_gpu_mem_mb"]
         if not args.no_gt:
-            cols.extend(
-                [
-                    "mean_miou", "median_miou", "p10_miou", "p90_miou",
-                    "pass_count", "fail_count", "total", "pass_rate",
-                ]
-            )
+            cols.extend(["mean_miou", "median_miou", "p10_miou", "p90_miou"])
         writer.writerow(cols)
         for n in args.n_values:
             s = stats[f"N={n}"]
             row_out = [n, s["latency_ms"]["median"], s["gpu_mem_mb_peak"]]
             if not args.no_gt:
                 iou = s["miou"]
-                p = s["pass"]
                 row_out.extend(
-                    [
-                        iou["mean"], iou["median"], iou["p10"], iou["p90"],
-                        p["pass_count"], p["fail_count"], p["total"],
-                        round(p["pass_rate"], 4),
-                    ]
+                    [iou["mean"], iou["median"], iou["p10"], iou["p90"]]
                 )
             writer.writerow(row_out)
 
@@ -544,15 +500,9 @@ def _write_summary(
         lines.append(f"- peak GPU mem: {s['gpu_mem_mb_peak']:.0f} MB")
         if not args.no_gt:
             iou = s["miou"]
-            p = s["pass"]
             lines.append(
                 f"- mIoU: mean {iou['mean']:.3f} / median {iou['median']:.3f} "
                 f"/ p10 {iou['p10']:.3f} / p90 {iou['p90']:.3f} / std {iou['std']:.3f}"
-            )
-            lines.append(
-                f"- pass rate (mIoU >= {p['threshold']}): "
-                f"{p['pass_count']}/{p['total']} = {p['pass_rate']*100:.1f}% "
-                f"(fail {p['fail_count']})"
             )
         lines.append("")
 
@@ -561,7 +511,6 @@ def _write_summary(
         gate = [
             ("mean(mIoU) >= 0.7 (N=8)", s8["miou"]["mean"], 0.7, ">="),
             ("p10(mIoU) >= 0.5 (N=8)", s8["miou"]["p10"], 0.5, ">="),
-            ("pass rate >= 0.7 (N=8)", s8["pass"]["pass_rate"], 0.7, ">="),
             ("latency median <= 500 ms (N=8)", s8["latency_ms"]["median"], 500, "<="),
             ("peak GPU mem <= 12000 MB (N=8)", s8["gpu_mem_mb_peak"], 12000, "<="),
         ]
@@ -577,18 +526,18 @@ def _write_summary(
     lines.append("## 下一步")
     lines.append("")
     lines.append(
-        "- 看 `predictions/N<n>/<stem>/{target,pred,overlay}.png` 三張對照"
-        "（overlay = target + 染色 mask；每個 N 一個 sub-dir 方便 N 之間並排比對）。"
+        "- 每個 N 一個 sub-dir：`N<n>/<target_stem>.png` (原圖) 與 "
+        "`N<n>/<target_stem>_overlay.png`（target + 染色 mask）並排比對。"
     )
     lines.append(
-        "- 各 N 的逐張數值在 `per_image_N<n>.csv`，彙總在 `n_sweep.csv` 與 `stats.json` 的 `N=<n>` key。"
+        "- 各 N 的逐張數值在 `per_image_N<n>.csv`，彙總在 `n_sweep.csv` 與 "
+        "`stats.json` 的 `N=<n>` key。"
     )
-    if not args.no_gt:
-        lines.append(
-            "- `failures/N<n>/` 收 mIoU < threshold 的 case，逐張看是否 prompt 多樣性不夠。"
-        )
-    lines.append("- 全過 → 補綠 / 藍擋板 + 棧板下緣 prompt pool，擴大正式 Phase 0。")
-    lines.append("- 任一條沒過 → 列 root cause（多樣性 / 場景 / 資源），決定調 pool / 換 backend / 改解析度。")
+    lines.append(
+        "- 換 prompt set：`ln -sfn <new_prompt_dir> "
+        "data/phase_0_test/prompt` 後重跑 driver；本次輸出留在 "
+        "`output/<timestamp>/`，不會被覆寫。"
+    )
     (run_dir / "SUMMARY.md").write_text("\n".join(lines) + "\n")
 
 
