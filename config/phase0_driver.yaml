@@ -9,13 +9,14 @@
 #   no_gt           bool        skip mIoU (visual + latency only)
 
 # GT mIoU evaluation disabled by default — annotated targets are not
-# yet available. Driver still emits N<n>/<target_stem>{,_overlay}.png +
-# per_image_N<n>.csv (latency / gpu_mem / mask_positive_pixels) and
+# yet available. Driver still emits image/<target_stem>.png (raw,
+# once) + image/<target_stem>_N<n>.png (one overlay per N),
+# per_image_N<n>.csv (latency / gpu_mem / mask_positive_pixels), and
 # n_sweep.csv per-N latency / GPU-mem rows. Flip to `false` once GT
 # lands.
 no_gt: true
 
 n_values: [1, 2, 4, 8]
 mode: instance
-overlay_color: [0, 0, 0]   # black
+overlay_color: [128, 0, 128]   # purple (BGR)
 overlay_alpha: 0.5

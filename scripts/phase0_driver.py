@@ -8,7 +8,8 @@ For each (target, N) pair:
 
 Outputs ``<run-dir-base>/<run-name>/``:
   meta.json, per_image_N<n>.csv, stats.json, n_sweep.csv, SUMMARY.md,
-  N<n>/<target_stem>.png + <target_stem>_overlay.png
+  image/<target_stem>.png       (raw target, once per target),
+  image/<target_stem>_N<n>.png  (target + tinted mask, one per N)
 
 Workflow: prompts-dir is meant to be a symlink (``ln -sfn``) re-pointed
 at whichever prompt set you want to evaluate. Each run writes a fresh
@@ -40,7 +41,7 @@ import numpy as np
 _REPO = Path(__file__).resolve().parent.parent
 # data/ is .gitignore'd evaluation data — mounted by virtue of the whole
 # repo being mounted at ~/work, kept out of the backend repo to honour
-# "SegGPT Backend Repo (職責邊界)" generic-reuse rule.
+# the SegGPT backend repo job-boundary (generic-reuse) rule.
 _DEFAULT_DATA = _REPO / "data" / "phase_0_test"
 # `prompt` is meant to be a symlink (`ln -sfn <prompt_set> prompt`)
 # re-pointed before each run; the driver reads `prompt_01..prompt_08`
@@ -350,7 +351,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         "overlay_color_bgr": list(args.overlay_color),
         "overlay_alpha": args.overlay_alpha,
     }
-    (run_dir / "meta.json").write_text(json.dumps(meta, indent=2))
 
     print(f"[driver] loading model {args.model}", file=sys.stderr)
     t_load = time.perf_counter()
@@ -359,10 +359,18 @@ def main(argv: Optional[List[str]] = None) -> int:
     backend = SegGPTBackend(model_path=args.model, config_path=args.config)
     load_ms = (time.perf_counter() - t_load) * 1000.0
     print(f"[driver] model loaded in {load_ms:.1f} ms", file=sys.stderr)
+    meta["model_load_ms"] = round(load_ms, 1)
+    (run_dir / "meta.json").write_text(json.dumps(meta, indent=2))
+
+    image_dir = run_dir / "image"
+    image_dir.mkdir(parents=True, exist_ok=True)
 
     rows: List[Dict] = []
     for tgt_path in targets:
         target_img = _read_rgb(tgt_path)
+        target_bgr = cv2.imread(str(tgt_path))
+        cv2.imwrite(str(image_dir / f"{tgt_path.stem}.png"), target_bgr)
+
         gt_mask = None
         if not args.no_gt:
             gt_mask = _read_mask(args.gt_dir / tgt_path.name)
@@ -385,15 +393,11 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "mask_positive_pixels": int(pred_first.astype(bool).sum()),
             }
 
-            n_dir = run_dir / f"N{n}"
-            n_dir.mkdir(parents=True, exist_ok=True)
-            target_bgr = cv2.imread(str(tgt_path))
             mask_bool = pred_first.astype(bool)
             overlay = _apply_overlay(
                 target_bgr, mask_bool, args.overlay_color, args.overlay_alpha
             )
-            cv2.imwrite(str(n_dir / f"{tgt_path.stem}.png"), target_bgr)
-            cv2.imwrite(str(n_dir / f"{tgt_path.stem}_overlay.png"), overlay)
+            cv2.imwrite(str(image_dir / f"{tgt_path.stem}_N{n}.png"), overlay)
 
             if gt_mask is not None:
                 pred_for_iou = _resize_to(pred_first, gt_mask.shape)
@@ -514,29 +518,29 @@ def _write_summary(
             ("latency median <= 500 ms (N=8)", s8["latency_ms"]["median"], 500, "<="),
             ("peak GPU mem <= 12000 MB (N=8)", s8["gpu_mem_mb_peak"], 12000, "<="),
         ]
-        lines.append("## 通過判讀（主流程 §7）")
+        lines.append("## Gate (main test-flow §7)")
         lines.append("")
-        lines.append("| 條件 | 值 | 通過 |")
+        lines.append("| condition | value | pass |")
         lines.append("|---|---|---|")
         for label, value, thresh, op in gate:
             ok = (value >= thresh) if op == ">=" else (value <= thresh)
-            lines.append(f"| {label} | {value:.3f} | {'是' if ok else '否'} |")
+            lines.append(f"| {label} | {value:.3f} | {'yes' if ok else 'no'} |")
         lines.append("")
 
-    lines.append("## 下一步")
+    lines.append("## Next steps")
     lines.append("")
     lines.append(
-        "- 每個 N 一個 sub-dir：`N<n>/<target_stem>.png` (原圖) 與 "
-        "`N<n>/<target_stem>_overlay.png`（target + 染色 mask）並排比對。"
+        "- Per target under `image/`: `<target_stem>.png` (raw, once) plus one "
+        "`<target_stem>_N<n>.png` overlay per N value for side-by-side compare."
     )
     lines.append(
-        "- 各 N 的逐張數值在 `per_image_N<n>.csv`，彙總在 `n_sweep.csv` 與 "
-        "`stats.json` 的 `N=<n>` key。"
+        "- Per-image numbers in `per_image_N<n>.csv`; rolled up in `n_sweep.csv` "
+        "and `stats.json` under the `N=<n>` key."
     )
     lines.append(
-        "- 換 prompt set：`ln -sfn <new_prompt_dir> "
-        "data/phase_0_test/prompt` 後重跑 driver；本次輸出留在 "
-        "`output/<timestamp>/`，不會被覆寫。"
+        "- Switch prompt set: `ln -sfn <new_prompt_dir> data/phase_0_test/prompt`, "
+        "then re-run the driver. Existing output stays in `output/<timestamp>/` and "
+        "is not overwritten."
     )
     (run_dir / "SUMMARY.md").write_text("\n".join(lines) + "\n")
 
