@@ -3,7 +3,7 @@
 # because (a) raw image volume + (b) backend repo must stay generic per
 # "SegGPT Backend Repo (職責邊界)" in CoreSAM CLAUDE.md.
 /data/
-/phase0_runs/
+/output/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

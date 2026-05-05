@@ -247,50 +247,6 @@ class TestNSubsetsAreSubsetsOfPool:
             assert len(set(indices)) == n, f"N={n} has duplicate indices: {indices}"
 
 
-class TestPassStats:
-    """Lock the pass/fail definition: pass = mIoU >= threshold (matches the
-    failure-copy condition `miou < threshold` in main()), so pass_count +
-    fail_count always equals total. Empty input returns 0/0/0/0.0."""
-
-    def test_empty_returns_zero_rates(self, driver):
-        out = driver._pass_stats([], 0.5)
-        assert out == {"total": 0, "pass_count": 0, "fail_count": 0, "pass_rate": 0.0}
-
-    def test_all_pass(self, driver):
-        out = driver._pass_stats([0.6, 0.7, 0.8], 0.5)
-        assert out["pass_count"] == 3
-        assert out["fail_count"] == 0
-        assert out["total"] == 3
-        assert out["pass_rate"] == pytest.approx(1.0)
-
-    def test_all_fail(self, driver):
-        out = driver._pass_stats([0.1, 0.2, 0.4], 0.5)
-        assert out["pass_count"] == 0
-        assert out["fail_count"] == 3
-        assert out["pass_rate"] == pytest.approx(0.0)
-
-    def test_threshold_is_inclusive(self, driver):
-        # mIoU == threshold counts as a pass (>=), mirroring the inverse
-        # `< threshold` failure-copy condition in main().
-        out = driver._pass_stats([0.5, 0.5, 0.4999], 0.5)
-        assert out["pass_count"] == 2
-        assert out["fail_count"] == 1
-
-    def test_mixed_rate_rounds_correctly(self, driver):
-        # 4/10 pass -> 0.4
-        mious = [0.6, 0.6, 0.6, 0.6, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4]
-        out = driver._pass_stats(mious, 0.5)
-        assert out["pass_count"] == 4
-        assert out["total"] == 10
-        assert out["pass_rate"] == pytest.approx(0.4)
-
-    def test_pass_plus_fail_equals_total(self, driver):
-        # Invariant: pass_count + fail_count == total for any input.
-        for vals in ([0.0], [1.0], [0.3, 0.5, 0.7], [0.5] * 5):
-            out = driver._pass_stats(vals, 0.5)
-            assert out["pass_count"] + out["fail_count"] == out["total"]
-
-
 class TestLoadDriverYaml:
     """Lock the YAML override contract: missing -> {}, unknown keys -> SystemExit,
     overlay_color list -> tuple, malformed file rejected."""
@@ -315,7 +271,7 @@ class TestLoadDriverYaml:
             tmp_path,
             "n_values: [1, 4]\n"
             "mode: semantic\n"
-            "failure_threshold: 0.6\n"
+            "no_gt: false\n"
             "overlay_color: [10, 20, 30]\n"
             "overlay_alpha: 0.3\n",
         )
@@ -323,7 +279,7 @@ class TestLoadDriverYaml:
         assert out == {
             "n_values": [1, 4],
             "mode": "semantic",
-            "failure_threshold": 0.6,
+            "no_gt": False,
             "overlay_color": (10, 20, 30),
             "overlay_alpha": 0.3,
         }

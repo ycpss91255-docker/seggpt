@@ -89,26 +89,25 @@ python scripts/phase0.py
 
 預期 `miou` ≥ 0.9。低於門檻 → **暫停其他項目**，先 bisect 哪個 commit 引入退化。
 
-### 4.2 多場景 mIoU 統計（每個分割對象）
+### 4.2 多場景目視判讀（每個分割對象）
 
-對每個對象的 N≥20 test set 跑 `infer()`，記錄：
+> **GT 不可得**：real-photo 場景下，要對每張 target 標出所有 visible 實例（讓 raw SegGPT 輸出能被公平打分）成本不切實際。Phase 0 本地端不算 mIoU；mIoU 量化指標**引 SegGPT 論文**：DAVIS ~0.85（video 同物件分割），COCO-20i ~0.59（few-shot semantic）。本地端只做：
 
-| 統計量 | 預期 | 解釋 |
-|---|---|---|
-| `mean(mIoU)` | ≥ 0.7 (倉儲場域，比 DAVIS 0.85 寬) | 平均落點 |
-| `median(mIoU)` | ≥ 0.75 | 對 outlier robust 的中位數 |
-| `p10(mIoU)` | ≥ 0.5 | worst case；低於這條表示 prompt pool 不夠多樣 |
-| `p90(mIoU)` | ≥ 0.85 | best case |
-| `std(mIoU)` | ≤ 0.15 | 一致性 |
+| 量測 | 預期 / 來源 |
+|---|---|
+| 目視 overlay 是否合理涵蓋目標 | 看 `output/<run>/N<n>/<stem>_overlay.png` |
+| `mask_positive_pixels > 0`（pipeline 沒退化）| `per_image_N<n>.csv` |
+| `latency` / `gpu_mem` 是否在預算內 | 見 §4.4 |
+| hmbb 回歸基準 mIoU > 0.9 | §4.1（fixed test fixture，repo 內附 GT） |
 
 **判讀**：
-- `mean ≥ 0.7` 且 `p10 ≥ 0.5` → **通過 Phase 0**，進 A-Phase 1
-- `p10 < 0.5` → 找 worst-case 圖看看是哪些情況，調 prompt pool（光線 / 角度補洞）
-- `mean < 0.7` 且 prompt 已掃過 → **可能要換 backend** 或進 prompt tuning
+- overlay 視覺上吃到目標、N=8 比 N=1 邊界更乾淨 → **通過 Phase 0**，進 A-Phase 1
+- overlay 全黑或範圍亂跳（多 instance 串色 / 邊界破碎）→ **prompt pool 多樣性不夠**，補不同光照 / 角度的 prompt
+- 多場景連 overlay 都救不回來 → **可能要換 backend** 或進 prompt tuning
 
-### 4.3 Feature Ensemble — N=1/4/8 sweep
+### 4.3 Feature Ensemble — N=1/2/4/8 sweep
 
-對 prompt pool 大小 N ∈ {1, 4, 8} 各跑一輪：
+對 prompt pool 大小 N ∈ {1, 2, 4, 8} 各跑一輪：
 
 | N | 預期效果 |
 |---|---|
@@ -116,10 +115,10 @@ python scripts/phase0.py
 | 4 | 應該明顯優於 N=1（語意平均開始發揮）|
 | 8 | DAVIS 上的甜蜜點；倉儲場域可能 N=4 就夠 |
 
-**判讀**：
-- N=4 / N=8 mIoU 平台或下降 → **prompt pool 多樣性不夠**（同質性高），補不同光照 / 角度的 prompt 才會有意義
-- N=8 顯著優於 N=4 → 留在 N=8
-- N=4 ≈ N=8 → 用 N=4（推論成本低）
+**判讀（全靠目視，因 GT 不可得）**：
+- N=4 / N=8 overlay 跟 N=1 看不出差別 → **prompt pool 多樣性不夠**（同質性高），補不同光照 / 角度的 prompt 才會有意義
+- N=8 邊界明顯比 N=4 乾淨、漏標補齊 → 留在 N=8
+- N=4 ≈ N=8（hard to tell）→ 用 N=4（推論成本低）
 
 ### 4.4 Latency / GPU mem 分佈
 
@@ -164,9 +163,9 @@ pytest test/integration/runtime/test_seggpt_backend_e2e.py -v
 
 `scripts/phase0_driver.py` 是 multi-target / multi-N driver — 對 `<targets-dir>` 內每張 image × `<n-values>` 各跑一次 `infer()`，model 只 load 一次，輸出符合 §6 格式的 run dir。
 
-第一個具體實例：**iron_beam_prompt × small_target**（鐵色擋板 + 32 張小目標 + GT），完整流程見 [`doc/phase0-iron-beam-test.md`](phase0-iron-beam-test.md)。
+第一個具體實例：**iron_beam_prompt × target**（鐵色擋板 + 3548 張 raw target，無 GT），完整流程見 [`doc/phase0-iron-beam-test.md`](phase0-iron-beam-test.md)。
 
-跑法（容器內，無參即 default 指向 iron_beam × small_target）：
+跑法（容器內，無參即 default 讀 `data/phase_0_test/prompt`（symlink）+ `data/phase_0_test/target/`）：
 
 ```bash
 python scripts/phase0_driver.py
@@ -179,43 +178,68 @@ python scripts/phase0_driver.py
 每次完整 Phase 0 run 產生 1 個目錄：
 
 ```
-phase0_runs/
-└── 2026-04-30_<scene>_<commit>/
-    ├── meta.json                # commit / model_path / pool_size / N / device
-    ├── per_image.csv            # image_id, mIoU, latency_ms, gpu_mem_mb, ref_count
-    ├── stats.json               # mean / median / p10 / p90 / std per object
-    ├── n_sweep.csv              # N=1/4/8 各自的 mIoU 中位數
-    ├── pred_masks/              # 每張 target 的預測 mask PNG
-    └── failures/                # mIoU < 0.5 的 case，target + pred + gt 並排存
+output/
+└── 2026-05-04_1530/                                # YYYY-MM-DD_HHMM
+    ├── meta.json                                   # commit / model_path / prompts_dir / N / mode / no_gt / overlay
+    ├── per_image_N1.csv                            # latency_ms, gpu_mem_mb, mask_positive_pixels, [miou]
+    ├── per_image_N2.csv
+    ├── per_image_N4.csv
+    ├── per_image_N8.csv
+    ├── stats.json                                  # 每個 N 的 latency / GPU mem / [mIoU] 統計
+    ├── n_sweep.csv                                 # N=1/2/4/8 各自的 latency / GPU mem / [mIoU]
+    ├── N1/<target_stem>.png + <stem>_overlay.png   # 原圖 + 染色 overlay (N=1)
+    ├── N2/<target_stem>.png + <stem>_overlay.png   # N=2
+    ├── N4/<target_stem>.png + <stem>_overlay.png   # N=4
+    ├── N8/<target_stem>.png + <stem>_overlay.png   # N=8
+    └── SUMMARY.md
 ```
 
-判讀完寫一句總結進 `phase0_runs/<run>/SUMMARY.md`，註記：
+mIoU / failures / pass-rate 由 `no_gt` 開關控制（YAML 默認 `true`）；現階段只看 latency / GPU-mem / overlay。
+
+換 prompt set 的工作流：
+
+```bash
+# 把 active prompts 指向某組已 curate 的 prompt pool
+ln -sfn iron_beam_prompts data/phase_0_test/prompt
+python scripts/phase0_driver.py        # 寫 output/<timestamp>/
+
+# 換另一組
+ln -sfn pallet_lower_edge data/phase_0_test/prompt
+python scripts/phase0_driver.py        # 寫 output/<timestamp_2>/，前一次保留
+
+# 並排比對 N=8 overlay
+diff output/<timestamp>/N8 output/<timestamp_2>/N8
+```
+
+判讀完寫一句總結進 `output/<run>/SUMMARY.md`，註記：
 - 通過 / 不通過
 - worst case 觀察
 - 下一輪要調整 prompt pool 的哪幾張 / 加哪幾類
 
 ## 7. 判讀準則總表
 
-| 通過 Phase 0 | 條件（4 個對象都要過）|
-|---|---|
-| Pipeline | 必過：hmbb mIoU > 0.9 |
-| mIoU mean | ≥ 0.7 |
-| mIoU p10 | ≥ 0.5 |
-| Latency median | ≤ 500 ms |
-| GPU mem peak | ≤ 12 GB |
+| 通過 Phase 0 | 條件（4 個對象都要過）| 量測方式 |
+|---|---|---|
+| Pipeline | 必過：hmbb mIoU > 0.9 | repo 內附 GT，在 `test/integration/` 跑 |
+| 多場景目視 | overlay 視覺上吃到目標，N 增大邊界更乾淨 | 看 `output/<run>/N<n>/<stem>_overlay.png` |
+| `mask_positive_pixels` | > 0（沒退化成全黑）| `per_image_N<n>.csv` |
+| Latency median | ≤ 500 ms | `n_sweep.csv` |
+| GPU mem peak | ≤ 12 GB | `n_sweep.csv` |
+
+> mIoU 量化指標**不在本地驗**（real-photo 場景每張 visible pallet 都要標出來才公平、不切實際）。要引用 SegGPT 在這個任務上的代表數字時以論文為準（DAVIS ~0.85、COCO-20i ~0.59）。
 
 任何一條沒過 → 列出 root cause（prompt 多樣性不足？特定場景持續 fail？資源吃太重？）→ 決定是調 pool / 換 backend / 改解析度。
 
 ## 8. 待補（暫不阻擋 Phase 0 開始）
 
-- **Driver script**：迴圈跑整個 test set + N sweep + latency 統計，產出 §6 格式的 run 目錄。`scripts/phase0.py` 目前只是 single-shot CLI。
-- **Worst-case 視覺化工具**：自動把 mIoU < 0.5 的 case 拉到 `failures/`，target / pred / gt 並排存，方便人眼掃。
-- **Feature Ensemble 失效偵測**：當 N=8 不顯著優於 N=1 時自動 flag「prompt pool 多樣性不足」。
+- **Feature Ensemble 失效偵測**：當 N=8 跟 N=1 的 overlay 視覺上沒差時自動 flag「prompt pool 多樣性不足」（目前靠人眼）。
+- **SIM 端 GT 流**：Isaac SIM 場景能自動生成 GT mask，未來 SIM Phase 0 可重啟 mIoU pass 準則（C-Phase）；real-photo 端永遠目視。
 
 ---
 
 ## 附：跨場域數字對齊（防止對齊錯誤）
 
-- DAVIS（學術 video object segmentation）SegGPT 報過 mIoU ~0.85，N=8 sweet spot
-- 倉儲場域寫 0.7 是寬鬆過的，因為：擋板顏色相似 / 反光 / 部分遮擋常見、prompt pool 不大、SegGPT 沒在這場域 finetune
-- 如果倉儲也能直接打到 0.85+，那 A-Phase 1 prompt tuning 可以延後甚至砍掉（Rule of Three：第三個用例才需要的功能）
+- DAVIS（學術 video object segmentation）SegGPT 論文報 mIoU ~0.85，N=8 sweet spot
+- COCO-20i（few-shot semantic）SegGPT 論文報 mIoU ~0.59
+- 倉儲場域**沒有量化基準**（GT 不可得），只能視覺判斷 + 推論成本是否符合
+- 如果論文數字 + 倉儲視覺結果都能說服自己，就進 A-Phase 1；否則 prompt tuning（A-Phase 1）才是真正的 quantitative bar 來源（小 train set + 自家 GT）
