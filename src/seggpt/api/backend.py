@@ -9,7 +9,7 @@ The output dict is **raw**: callers (CoreSAM in production, the
 Phase 0 benchmark harness during validation) decide whether the mask
 is good enough to surface, what bounding box to derive, what status
 code to set. This split keeps the backend reusable beyond CoreSAM
-(see CLAUDE.md SegGPT Backend Repo - 職責邊界).
+(see CLAUDE.md SegGPT Backend Repo job-boundary section).
 
 Output schema::
 

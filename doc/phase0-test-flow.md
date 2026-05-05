@@ -95,7 +95,7 @@ python scripts/phase0.py
 
 | 量測 | 預期 / 來源 |
 |---|---|
-| 目視 overlay 是否合理涵蓋目標 | 看 `output/<run>/N<n>/<stem>_overlay.png` |
+| 目視 overlay 是否合理涵蓋目標 | 看 `output/<run>/image/<stem>_N<n>.png` |
 | `mask_positive_pixels > 0`（pipeline 沒退化）| `per_image_N<n>.csv` |
 | `latency` / `gpu_mem` 是否在預算內 | 見 §4.4 |
 | hmbb 回歸基準 mIoU > 0.9 | §4.1（fixed test fixture，repo 內附 GT） |
@@ -187,10 +187,12 @@ output/
     ├── per_image_N8.csv
     ├── stats.json                                  # 每個 N 的 latency / GPU mem / [mIoU] 統計
     ├── n_sweep.csv                                 # N=1/2/4/8 各自的 latency / GPU mem / [mIoU]
-    ├── N1/<target_stem>.png + <stem>_overlay.png   # 原圖 + 染色 overlay (N=1)
-    ├── N2/<target_stem>.png + <stem>_overlay.png   # N=2
-    ├── N4/<target_stem>.png + <stem>_overlay.png   # N=4
-    ├── N8/<target_stem>.png + <stem>_overlay.png   # N=8
+    ├── image/                                      # 全部 PNG 都在這
+    │   ├── <target_stem>.png                       # 原圖（每 target 一張）
+    │   ├── <target_stem>_N1.png                    # 染色 overlay (N=1)
+    │   ├── <target_stem>_N2.png                    # N=2
+    │   ├── <target_stem>_N4.png                    # N=4
+    │   └── <target_stem>_N8.png                    # N=8
     └── SUMMARY.md
 ```
 
@@ -208,7 +210,7 @@ ln -sfn pallet_lower_edge data/phase_0_test/prompt
 python scripts/phase0_driver.py        # 寫 output/<timestamp_2>/，前一次保留
 
 # 並排比對 N=8 overlay
-diff output/<timestamp>/N8 output/<timestamp_2>/N8
+diff output/<timestamp>/image output/<timestamp_2>/image
 ```
 
 判讀完寫一句總結進 `output/<run>/SUMMARY.md`，註記：
@@ -221,7 +223,7 @@ diff output/<timestamp>/N8 output/<timestamp_2>/N8
 | 通過 Phase 0 | 條件（4 個對象都要過）| 量測方式 |
 |---|---|---|
 | Pipeline | 必過：hmbb mIoU > 0.9 | repo 內附 GT，在 `test/integration/` 跑 |
-| 多場景目視 | overlay 視覺上吃到目標，N 增大邊界更乾淨 | 看 `output/<run>/N<n>/<stem>_overlay.png` |
+| 多場景目視 | overlay 視覺上吃到目標，N 增大邊界更乾淨 | 看 `output/<run>/image/<stem>_N<n>.png` |
 | `mask_positive_pixels` | > 0（沒退化成全黑）| `per_image_N<n>.csv` |
 | Latency median | ≤ 500 ms | `n_sweep.csv` |
 | GPU mem peak | ≤ 12 GB | `n_sweep.csv` |

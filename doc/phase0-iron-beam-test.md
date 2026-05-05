@@ -134,7 +134,7 @@ driver 預設（取自 `config/phase0_driver.yaml` + 內建 fallback）：
 driver 流程（model 只 load 一次）：
 
 1. 對 3548 張 target × N ∈ {1, 2, 4, 8} 各跑一次 `SegGPTBackend.infer()` = 14192 次 inference
-2. 每次寫 `output/<run-name>/N<n>/<target_stem>.png`（原圖）+ `<target_stem>_overlay.png`（target + 染色 mask）
+2. 寫 `output/<run-name>/image/<target_stem>.png`（原圖，每 target 一次）+ `image/<target_stem>_N<n>.png`（target + 染色 mask，每 N 一張）
 3. 收 per-N stats（latency / GPU mem，no_gt=true 時不收 mIoU）
 4. 寫 `SUMMARY.md`（latency / GPU mem 通過判讀，沒 mIoU gate）
 
@@ -142,16 +142,16 @@ driver 流程（model 只 load 一次）：
 
 ```bash
 # host
-ls output/<run-name>/N1/        # 每張 target 兩檔（原圖 + overlay）
-ls output/<run-name>/N8/        # 同上
+ls output/<run-name>/image/     # 全部 PNG: <stem>.png + <stem>_N1/N2/N4/N8.png
 cat output/<run-name>/SUMMARY.md
 ```
 
 並排比對 N=1 vs N=8 看 prompt 多樣性是否拉高了 overlay 品質：
 
 ```bash
-diff output/<run-name>/N1 output/<run-name>/N8
-# 或視覺工具開兩邊資料夾並排
+# 對單一 target 比較不同 N
+ls output/<run-name>/image/target_000001_N*.png
+# 或在影像瀏覽器一次選 _N1.png / _N8.png 兩張開啟
 ```
 
 ## 4. 結果格式（driver 輸出）
@@ -165,10 +165,9 @@ output/<run-name>/
 ├── per_image_N8.csv
 ├── stats.json                                      # 每個 N 的 latency / GPU mem 統計
 ├── n_sweep.csv                                     # N=1/2/4/8 各自的 latency / GPU mem
-├── N1/<target_stem>.png + <stem>_overlay.png × <n_targets>  # 原圖 + 染色 overlay
-├── N2/<target_stem>.png + <stem>_overlay.png × <n_targets>
-├── N4/<target_stem>.png + <stem>_overlay.png × <n_targets>
-├── N8/<target_stem>.png + <stem>_overlay.png × <n_targets>
+├── image/                                          # 全部 PNG 都在這
+│   ├── <target_stem>.png × <n_targets>             # 原圖（每 target 一張）
+│   └── <target_stem>_N{1,2,4,8}.png × <n_targets>  # 染色 overlay（每 N 一張）
 └── SUMMARY.md                                      # 自動生成的 markdown 通過判讀表
 ```
 
@@ -182,8 +181,8 @@ output/<run-name>/
 |---|---|---|
 | `latency median` ≤ 500 ms | 消費級 GPU | `stats.json N=8.latency_ms.median` |
 | `peak gpu_mem` ≤ 12000 MB | RTX 3090/4080 | `stats.json N=8.gpu_mem_mb_peak` |
-| visual: overlay 涵蓋鐵梁 | 目視 | `output/<run>/N8/<stem>_overlay.png` |
-| visual: N=8 邊界比 N=1 乾淨 | 目視 | 並排比對 N1 vs N8 overlay |
+| visual: overlay 涵蓋鐵梁 | 目視 | `output/<run>/image/<stem>_N8.png` |
+| visual: N=8 邊界比 N=1 乾淨 | 目視 | 並排 `<stem>_N1.png` vs `<stem>_N8.png` |
 
 額外 visual inspection（不是 hard gate，是 root cause 線索）：
 
