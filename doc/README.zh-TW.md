@@ -79,4 +79,4 @@ seggpt/
 
 ## 授權
 
-GPL-3.0。見 [LICENSE](../LICENSE)。
+Apache-2.0。見 [LICENSE](../LICENSE)。
