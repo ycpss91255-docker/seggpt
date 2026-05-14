@@ -1,4 +1,4 @@
-# SegGPT backend Dockerfile (derived from ycpss91255-docker/template).
+# SegGPT backend Dockerfile (derived from ycpss91255-docker/base).
 #
 # Stages:
 #   sys     - User/group, locale, timezone (template default)
@@ -62,8 +62,8 @@ RUN if getent group "${USER_GID}" >/dev/null; then \
     fi && \
     echo "${USER_NAME} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
-############################## base ##############################
-FROM sys AS base
+############################## devel-base ##############################
+FROM sys AS devel-base
 
 ARG DEBIAN_FRONTEND=noninteractive
 # Same USER/USER_NAME alias dance as sys — ARGs do not flow across
@@ -183,7 +183,7 @@ RUN chown -R "${USER_NAME}":"${USER_GROUP}" "${CONDA_DIR}"
 # the env var unset (verified: torch 2.0.1, cuda 11.8, cudnn 8700).
 
 ############################## devel ##############################
-FROM base AS devel
+FROM devel-base AS devel
 
 # Repeat the alias dance from sys/base — ARGs do not flow across stages
 # so each stage that references the user has to redeclare. Switching
@@ -237,8 +237,10 @@ RUN cat "${CONFIG_DIR}"/shell/bashrc >> "/home/${USER_NAME}/.bashrc" && \
 # valid after the host bind-mount overlays this directory at run
 # time (host repo has identical layout). Edits on the host reflect
 # in the container without re-installing.
+# hadolint ignore=DL3022
 COPY --from=repo_root --chown="${USER_NAME}":"${USER_GROUP}" \
     pyproject.toml LICENSE README.md /home/${USER_NAME}/work/
+# hadolint ignore=DL3022
 COPY --from=repo_root --chown="${USER_NAME}":"${USER_GROUP}" \
     src /home/${USER_NAME}/work/src
 
@@ -251,11 +253,11 @@ EXPOSE 22 8888
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["bash"]
 
-############################## test ##############################
+############################## devel-test ##############################
 # Resolves to test-tools:local (local build.sh) or ghcr.io/.../test-tools:vX.Y.Z (CI).
 FROM ${TEST_TOOLS_IMAGE} AS test-tools-stage
 
-FROM devel AS test
+FROM devel AS devel-test
 
 USER root
 
@@ -270,11 +272,15 @@ COPY *.sh /lint/
 # Helpers sourced by the root-level scripts. Must sit next to them so
 # build.sh / run.sh / exec.sh / stop.sh / setup.sh can source _lib.sh
 # (which in turn sources i18n.sh); setup.sh also sources _tui_conf.sh.
-COPY template/script/docker/_lib.sh \
-     template/script/docker/i18n.sh \
-     template/script/docker/_tui_conf.sh \
+COPY .base/script/docker/_lib.sh \
+     .base/script/docker/i18n.sh \
+     .base/script/docker/_tui_conf.sh \
      /lint/
-RUN shellcheck -S warning /lint/*.sh
+# _lib.sh post-#284 is an umbrella that sources lib/*.sh sub-libs.
+# Preserve the lib/ subdirectory in /lint/ so the source paths inside
+# _lib.sh resolve identically to the normal .base/ layout.
+COPY .base/script/docker/lib /lint/lib
+RUN shellcheck -S warning /lint/*.sh /lint/lib/*.sh
 RUN cd /lint && hadolint Dockerfile
 
 # Bats (from pre-built test-tools image; see TEST_TOOLS_IMAGE at top)
@@ -284,8 +290,8 @@ RUN ln -sf /opt/bats/bin/bats /usr/local/bin/bats
 
 ENV BATS_LIB_PATH="/usr/lib/bats"
 
-# Smoke test (shared from template + repo-specific)
-COPY template/test/smoke/ /smoke_test/
+# Smoke test (shared from .base + repo-specific)
+COPY .base/test/smoke/ /smoke_test/
 COPY test/smoke/ /smoke_test/
 
 ARG USER="user"
@@ -306,11 +312,11 @@ USER "${USER_NAME}"
 RUN bats /smoke_test/
 
 ############################## runtime (optional) ##############################
-# Enabled when Layer 3 (FastAPI server) lands. Will derive from `base`
+# Enabled when Layer 3 (FastAPI server) lands. Will derive from `devel-base`
 # (not `sys`) so the inference stack is available, then COPY src/ and
 # launch uvicorn.
 #
-# FROM base AS runtime
+# FROM devel-base AS runtime
 # ARG USER="${USER_NAME}"
 # COPY --chmod=0755 script/entrypoint.sh /entrypoint.sh
 # COPY --chown="${USER}" src/ /workspace/src/

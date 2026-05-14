@@ -50,11 +50,11 @@ curl -X POST http://localhost:8888/infer \
 
 ```
 seggpt/
-├── docker/                      Docker 环境（template subtree）
-│   ├── template/                来自 ycpss91255-docker/template 的 git subtree
+├── docker/                      Docker 环境（base subtree）
+│   ├── .base/                   来自 ycpss91255-docker/base 的 git subtree
 │   ├── Dockerfile               per-repo Dockerfile
 │   ├── compose.yaml             setup.sh 自动生成（请勿手动编辑）
-│   ├── setup.conf               per-repo runtime 配置
+│   ├── config/docker/setup.conf per-repo runtime 配置（叠在 .base/config/docker/setup.conf 上）
 │   └── test/smoke/              docker image smoke tests（bats）
 ├── src/
 │   └── seggpt/                  Python package（安装为 `seggpt`）
