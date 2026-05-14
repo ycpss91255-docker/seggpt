@@ -79,4 +79,4 @@ See [TEST.md](doc/test/TEST.md) for detailed test inventory.
 
 ## License
 
-GPL-3.0. See [LICENSE](LICENSE).
+Apache-2.0. See [LICENSE](LICENSE).
