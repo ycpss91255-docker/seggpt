@@ -50,11 +50,11 @@ curl -X POST http://localhost:8888/infer \
 
 ```
 seggpt/
-├── docker/                      Docker 環境（template subtree）
-│   ├── template/                ycpss91255-docker/template からの git subtree
+├── docker/                      Docker 環境（base subtree）
+│   ├── .base/                   ycpss91255-docker/base からの git subtree
 │   ├── Dockerfile               per-repo Dockerfile
 │   ├── compose.yaml             setup.sh が自動生成（手動編集不可）
-│   ├── setup.conf               per-repo runtime 設定
+│   ├── config/docker/setup.conf per-repo runtime 設定（.base/config/docker/setup.conf に重ねる）
 │   └── test/smoke/              docker image smoke tests（bats）
 ├── src/
 │   └── seggpt/                  Python package（`seggpt` として install）
