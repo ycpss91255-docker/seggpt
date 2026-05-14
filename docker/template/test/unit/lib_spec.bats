@@ -213,6 +213,7 @@ EOF
 _write_sample_conf() {
   # Minimal setup.conf with comments, blanks, and two sections — used by
   # the dump tests to verify comment/blank skipping and section boundaries.
+  mkdir -p "$(dirname "${1}")"
   cat > "${1}" <<'EOF'
 [image]
 # rule comment — should be skipped
@@ -295,7 +296,7 @@ EOF
 
 @test "_print_config_summary prints files, identity, all populated sections, resolved" {
   local _fp="${BATS_TEST_TMPDIR}"
-  _write_sample_conf "${_fp}/setup.conf"
+  _write_sample_conf "${_fp}/config/docker/setup.conf"
   run bash -c "
     source ${LIB}
     FILE_PATH='${_fp}'
@@ -311,7 +312,7 @@ EOF
   "
   assert_success
   # File paths
-  assert_output --partial "setup.conf   : ${_fp}/setup.conf"
+  assert_output --partial "setup.conf   : ${_fp}/config/docker/setup.conf"
   assert_output --partial ".env         : ${_fp}/.env"
   assert_output --partial "compose.yaml : ${_fp}/compose.yaml"
   # Identity
@@ -336,10 +337,54 @@ EOF
   assert_output --partial "./setup_tui.sh"
 }
 
+@test "_print_config_summary prints Variables block mapping setup.conf placeholders to detected values" {
+  # The Identity block already shows resolved user/workspace, but the
+  # setup.conf [volumes] dump prints raw `${WS_PATH}` / `${USER_NAME}`
+  # placeholders. Variables block bridges the gap so users can map the
+  # placeholder to the value at a glance without re-deriving from
+  # Identity field labels.
+  local _fp="${BATS_TEST_TMPDIR}"
+  _write_sample_conf "${_fp}/config/docker/setup.conf"
+  run bash -c "
+    source ${LIB}
+    FILE_PATH='${_fp}'
+    USER_NAME=alice USER_UID=1000 USER_GROUP=alice USER_GID=1000
+    HARDWARE=x86_64 DOCKER_HUB_USER=alice IMAGE_NAME=myrepo
+    WS_PATH=/home/alice/work
+    GPU_ENABLED=true GPU_COUNT=all GPU_CAPABILITIES='gpu compute'
+    SETUP_GUI_DETECTED=true NETWORK_MODE=host IPC_MODE=host PRIVILEGED=false
+    TZ=Asia/Taipei APT_MIRROR_UBUNTU=tw.archive.ubuntu.com
+    APT_MIRROR_DEBIAN=mirror.twds.com.tw
+    PROJECT_NAME=alice-myrepo
+    _print_config_summary build
+  "
+  assert_success
+  assert_output --partial "Variables"
+  assert_output --partial "\${USER_NAME} = alice"
+  assert_output --partial "\${USER_UID}  = 1000"
+  assert_output --partial "\${USER_GROUP} = alice"
+  assert_output --partial "\${USER_GID}  = 1000"
+  assert_output --partial "\${WS_PATH}   = /home/alice/work"
+}
+
+@test "_print_config_summary Variables block falls back to '-' for unset values" {
+  local _fp="${BATS_TEST_TMPDIR}"
+  _write_sample_conf "${_fp}/config/docker/setup.conf"
+  run bash -c "
+    source ${LIB}
+    FILE_PATH='${_fp}'
+    unset USER_NAME USER_UID USER_GROUP USER_GID WS_PATH
+    _print_config_summary build
+  "
+  assert_success
+  assert_output --partial "\${USER_NAME} = -"
+  assert_output --partial "\${WS_PATH}   = -"
+}
+
 @test "_print_config_summary hides sections that are empty in setup.conf" {
   local _fp="${BATS_TEST_TMPDIR}"
   # Minimal conf with only [image]; expect no [build]/[volumes] headers
-  cat > "${_fp}/setup.conf" <<'EOF'
+  mkdir -p "${_fp}/config/docker" && cat > "${_fp}/config/docker/setup.conf" <<'EOF'
 [image]
 rule_1 = @basename
 EOF
@@ -359,6 +404,46 @@ EOF
   assert_output --partial "./setup_tui.sh"
 }
 
+@test "_print_config_summary wraps dividers + section headers in ANSI when FORCE_COLOR=1 (#309)" {
+  local _fp="${BATS_TEST_TMPDIR}"
+  _write_sample_conf "${_fp}/config/docker/setup.conf"
+  run bash -c "
+    FORCE_COLOR=1 source ${LIB}
+    FORCE_COLOR=1
+    FILE_PATH='${_fp}'
+    _print_config_summary build
+  "
+  assert_success
+  # Dividers wrapped in dim ANSI (\033[2m...\033[0m)
+  assert_output --partial $'\033[2m──'
+  # Section headers wrapped in bold ANSI (\033[1m...\033[0m)
+  assert_output --partial $'\033[1mFiles\033[0m'
+  assert_output --partial $'\033[1mIdentity\033[0m'
+  assert_output --partial $'\033[1mVariables\033[0m'
+  assert_output --partial $'\033[1msetup.conf\033[0m'
+  assert_output --partial $'\033[1mResolved\033[0m'
+  # Indented value lines stay un-styled
+  refute_output --partial $'\033[1m  setup.conf'
+  refute_output --partial $'\033[2m  setup.conf'
+}
+
+@test "_print_config_summary omits ANSI when NO_COLOR=1 overrides FORCE_COLOR=1 (#309)" {
+  local _fp="${BATS_TEST_TMPDIR}"
+  _write_sample_conf "${_fp}/config/docker/setup.conf"
+  run bash -c "
+    NO_COLOR=1 FORCE_COLOR=1 source ${LIB}
+    NO_COLOR=1 FORCE_COLOR=1
+    FILE_PATH='${_fp}'
+    _print_config_summary build
+  "
+  assert_success
+  # No ANSI escape sequences anywhere in output
+  refute_output --partial $'\033['
+  # Headers still present as plain text
+  assert_output --partial "Files"
+  assert_output --partial "Resolved"
+}
+
 @test "_print_config_summary warns when setup.conf exists but has no [section] headers" {
   # Empty / comments-only setup.conf is the same situation as missing
   # from a behavior standpoint (every section falls back to template
@@ -367,7 +452,7 @@ EOF
   # branch so downstream `build.sh` users see the warning.
   local _fp="${BATS_TEST_TMPDIR}/empty_conf"
   mkdir -p "${_fp}"
-  cat > "${_fp}/setup.conf" <<'EOF'
+  mkdir -p "${_fp}/config/docker" && cat > "${_fp}/config/docker/setup.conf" <<'EOF'
 # only comments, no [section] headers
 EOF
   run bash -c "source ${LIB}; FILE_PATH='${_fp}'; _print_config_summary build"
@@ -431,7 +516,7 @@ EOF
 
 @test "_print_config_summary uses zh-TW labels when _LANG=zh-TW" {
   local _fp="${BATS_TEST_TMPDIR}"
-  _write_sample_conf "${_fp}/setup.conf"
+  _write_sample_conf "${_fp}/config/docker/setup.conf"
   run bash -c "
     source ${LIB}
     _LANG=zh-TW
@@ -468,7 +553,7 @@ EOF
 
 @test "_print_config_summary uses ja labels when _LANG=ja" {
   local _fp="${BATS_TEST_TMPDIR}"
-  _write_sample_conf "${_fp}/setup.conf"
+  _write_sample_conf "${_fp}/config/docker/setup.conf"
   run bash -c "
     source ${LIB}
     _LANG=ja

@@ -6,9 +6,9 @@
 #   mkdir <repo_name> && cd <repo_name>
 #   git init
 #   git commit --allow-empty -m "chore: initial commit"
-#   git subtree add --prefix=template \
-#       https://github.com/ycpss91255-docker/template.git main --squash
-#   ./template/init.sh
+#   git subtree add --prefix=.base \
+#       https://github.com/ycpss91255-docker/base.git main --squash
+#   ./.base/init.sh
 #
 # (Substitute `git@github.com:...` for SSH if you have a key configured.)
 #
@@ -25,13 +25,19 @@ TEMPLATE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly TEMPLATE_DIR
 REPO_ROOT="$(cd -- "${TEMPLATE_DIR}/.." && pwd -P)"
 readonly REPO_ROOT
-TEMPLATE_REL="template"
+# Subtree prefix is whatever directory init.sh lives in (now standardised
+# to .base/ post-#263), so a downstream rename works without code changes:
+# re-run ./<new-prefix>/init.sh and all generated symlinks point through
+# the new prefix.
+TEMPLATE_REL="$(basename "${TEMPLATE_DIR}")"
 readonly TEMPLATE_REL
 
 # shellcheck disable=SC1091
 source "${TEMPLATE_DIR}/script/docker/lib/gitignore.sh"
+# shellcheck disable=SC1091
+source "${TEMPLATE_DIR}/script/docker/_lib.sh"
 
-_log() { printf "[init] %s\n" "$*"; }
+_log() { _log_info init "$*"; }
 
 # ── Symlink helper ──────────────────────────────────────────────────────────
 
@@ -73,34 +79,63 @@ _create_symlinks() {
 
 # _populate_config
 #
-# On first init (no <repo>/config/), copy `template/config/` out as a
-# real directory the user owns and can edit freely. Rationale:
+# On first init (no <repo>/config/), create an empty placeholder
+# directory at `<repo>/config/` with a `.gitkeep`. The Dockerfile's
+# layered COPY chain (template#254) reads `.base/config/` first
+# as the default layer and `<repo>/config/` second as the override
+# overlay; an empty <repo>/config/ means "no overrides, take all
+# template defaults". Downstream adds files under <repo>/config/
+# only when they want to override a specific template default.
+#
+# Rationale (compared to the pre-#254 full-copy seed):
 #   * a symlink would make edits spill into the subtree and fight
 #     `git subtree pull`;
-#   * a plain Dockerfile COPY from `template/config/` would deny the
-#     user any per-repo override path at all.
-# Copy gives the user a clean, repo-local editing surface; subsequent
-# template upgrades leave this directory untouched and `upgrade.sh`
-# prints a diff hint when the upstream baseline moves so the user can
-# reconcile manually.
+#   * a plain Dockerfile COPY from `.base/config/` alone would
+#     deny the user any per-repo override path at all;
+#   * a full-copy seed (pre-#254) gives the user a clean
+#     repo-local editing surface but freezes their config at the
+#     init-time template version -- subsequent template-side
+#     improvements drift, requiring manual diff/reconcile;
+#   * an EMPTY placeholder (post-#254) lets the layered COPY do
+#     the merge at build time. Repos opt into per-file overrides
+#     only when they need them; everything else flows through
+#     from .base/config/ on every build, keeping
+#     <repo>/config/ small and the override-vs-default contract
+#     visible in `git status` / `git diff`.
+#
+# Existing repos with a full <repo>/config/ snapshot from a
+# pre-v0.22.0 init keep working unchanged: their copy still
+# overrides every template default at build time, identical to
+# pre-#254 behaviour. They can manually trim files that match
+# template default to start receiving template-side improvements.
 _populate_config() {
-  # User already has a real config/ — preserve (contains their edits).
+  # User already has a real config/ — preserve (contains their edits
+  # or pre-#254 full-copy snapshot, both layered correctly).
   if [[ -d config && ! -L config ]]; then
     _log "  Keeping existing config/ directory"
     return 0
   fi
   # Stale symlink from an earlier init.sh version — drop it before
-  # copying. Without rm, `cp -r` would dereference and write INTO the
-  # symlink's target (i.e. pollute the subtree).
+  # creating the placeholder. Without rm, `mkdir` would fail if the
+  # symlink target is a real dir, or pollute the subtree if it's a
+  # .base/config/ symlink.
   if [[ -L config ]]; then
     rm -f config
   fi
-  if [[ ! -d "${TEMPLATE_REL}/config" ]]; then
-    _log "  Skipping config/ seed (${TEMPLATE_REL}/config not found)"
-    return 0
-  fi
-  cp -r "${TEMPLATE_REL}/config" config
-  _log "  Copied config/ from ${TEMPLATE_REL}/config (yours to edit)"
+  # Create empty placeholder + .gitkeep so the dir exists in git
+  # (Docker COPY of <repo>/config/ requires the path to exist).
+  mkdir -p config
+  cat > config/.gitkeep <<'EOF'
+# Placeholder so this directory exists in git. The Dockerfile's
+# layered COPY (template#254) reads .base/config/ first then
+# overlays <repo>/config/ on top. Drop files under <repo>/config/
+# only when you want to override a specific template default
+# (e.g. <repo>/config/shell/bashrc to override template's bashrc,
+# or <repo>/config/shell/bashrc.d/your-snippet.sh to add a drop-in).
+# Files NOT placed here keep flowing through from .base/config/
+# on every build.
+EOF
+  _log "  Created empty config/ placeholder (.base/config/ is the default layer; <repo>/config/ overlays per-file)"
 }
 
 _detect_template_version() {
@@ -113,7 +148,7 @@ _detect_template_version() {
   # Fallback: query remote tags (for fresh subtree add before .version existed).
   # HTTPS by default so fresh clones / CI runners without an SSH key still
   # work. Override via TEMPLATE_REMOTE env var (e.g. SSH for private forks).
-  local _remote="${TEMPLATE_REMOTE:-https://github.com/ycpss91255-docker/template.git}"
+  local _remote="${TEMPLATE_REMOTE:-https://github.com/ycpss91255-docker/base.git}"
   git ls-remote --tags --sort=-v:refname \
     "${_remote}" 2>/dev/null \
     | grep -oP 'refs/tags/v\d+\.\d+\.\d+$' \
@@ -200,14 +235,14 @@ permissions:
 
 jobs:
   call-docker-build:
-    uses: ycpss91255-docker/template/.github/workflows/build-worker.yaml@${ref}
+    uses: ycpss91255-docker/base/.github/workflows/build-worker.yaml@${ref}
     with:
       image_name: ${name}
 
   call-release:
     needs: call-docker-build
     if: startsWith(github.ref, 'refs/tags/')
-    uses: ycpss91255-docker/template/.github/workflows/release-worker.yaml@${ref}
+    uses: ycpss91255-docker/base/.github/workflows/release-worker.yaml@${ref}
     with:
       archive_name_prefix: ${name}
 YAML
@@ -290,14 +325,16 @@ _sync_existing_gitignore() {
 
 # ── Generate per-repo setup.conf ────────────────────────────────────────────
 #
-# Copies template/setup.conf to repo root so the user can override any section.
-# Replace strategy: a section present in the per-repo file fully replaces the
-# template's corresponding section; omitted sections fall back to template.
+# Copies <subtree-prefix>/config/docker/setup.conf to <repo>/config/docker/setup.conf
+# so the user can override any section. Replace strategy: a section present
+# in the per-repo file fully replaces the template's corresponding section;
+# omitted sections fall back to template.
 
 _gen_setup_conf() {
-  local _src="${TEMPLATE_DIR}/setup.conf"
-  local _dst="${REPO_ROOT}/setup.conf"
+  local _src="${TEMPLATE_DIR}/config/docker/setup.conf"
+  local _dst="${REPO_ROOT}/config/docker/setup.conf"
   local _force="${1:-false}"
+  mkdir -p "${REPO_ROOT}/config/docker"
   if [[ ! -f "${_src}" ]]; then
     _error "Template setup.conf not found at ${_src}"
   fi
@@ -337,33 +374,40 @@ _call_setup() {
   fi
 }
 
-_error() { printf "[init] ERROR: %s\n" "$*" >&2; exit 1; }
+_error() { _log_err init "$*"; exit 1; }
 
 # ── Main ────────────────────────────────────────────────────────────────────
 
 main() {
   if [[ "${1:-}" =~ ^(-h|--help)$ ]]; then
     cat >&2 <<'EOF'
-Usage: ./template/init.sh [--gen-conf [--force]]
+Usage: ./<subtree-prefix>/init.sh [--gen-conf [--force]]
 
-Initialize a repo with template. Auto-detects:
+Initialize a repo with the template subtree. Auto-detects:
   - Has Dockerfile → create symlinks, then run setup.sh
   - No Dockerfile  → generate full project structure, then run setup.sh
 
-Version is tracked in template/.version (auto-synced by subtree pull).
+The subtree prefix is taken from init.sh's own directory; the standard
+prefix is `.base/` but the script handles any prefix without code
+changes.
+
+Version is tracked in <subtree-prefix>/.version (auto-synced by subtree
+pull).
 
 Options:
-  --gen-conf         Copy template/setup.conf to <repo>/setup.conf so the
-                     user can override any section (image / build / deploy /
-                     gui / network / volumes). Refuses to overwrite an
-                     existing per-repo setup.conf unless --force is given.
+  --gen-conf         Copy <subtree-prefix>/config/docker/setup.conf to
+                     <repo>/config/docker/setup.conf so the user can
+                     override any section (image_name / gpu / gui /
+                     network / volumes / security / stage:*). Refuses
+                     to overwrite an existing per-repo setup.conf unless
+                     --force is given.
   --force            With --gen-conf: overwrite existing setup.conf,
                      backing up the previous setup.conf to setup.conf.bak
                      and .env to .env.bak first.
 
 Run from the repo root after:
-  git subtree add --prefix=template \
-      https://github.com/ycpss91255-docker/template.git <version> --squash
+  git subtree add --prefix=<subtree-prefix> \
+      <template-remote-url> <version> --squash
 EOF
     return 0
   fi

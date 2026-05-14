@@ -14,37 +14,8 @@ setup() {
   assert_success
 }
 
-@test "defines swc" {
-  run grep -q "^swc()" "${RC}"
-  assert_success
-}
-
 @test "defines color_git_branch" {
   run grep -q "^color_git_branch()" "${RC}"
-  assert_success
-}
-
-@test "defines ros1_complete and ros1_source" {
-  run grep -q "^ros1_complete()" "${RC}"
-  assert_success
-  run grep -q "^ros1_source()" "${RC}"
-  assert_success
-}
-
-@test "defines ros2_complete and ros2_source" {
-  run grep -q "^ros2_complete()" "${RC}"
-  assert_success
-  run grep -q "^ros2_source()" "${RC}"
-  assert_success
-}
-
-@test "defines _ros_detect helper" {
-  run grep -q "^_ros_detect()" "${RC}"
-  assert_success
-}
-
-@test "defines _ros_auto_source dispatcher" {
-  run grep -q "^_ros_auto_source()" "${RC}"
   assert_success
 }
 
@@ -76,31 +47,9 @@ setup() {
   assert_success
 }
 
-@test "_ros_auto_source is called at startup" {
-  run grep -qE "^_ros_auto_source[[:space:]]*$" "${RC}"
-  assert_success
-}
-
 # ════════════════════════════════════════════════════════════════════
 # Key content
 # ════════════════════════════════════════════════════════════════════
-
-@test "swc searches for catkin devel/setup.bash" {
-  run grep -q "devel" "${RC}"
-  assert_success
-}
-
-@test "ros1_source references ROS_DISTRO and catkin devel layout" {
-  run grep -q "ROS_DISTRO" "${RC}"
-  assert_success
-  run grep -q '/devel/setup.bash' "${RC}"
-  assert_success
-}
-
-@test "ros2_source references colcon install layout" {
-  run grep -q '/install/setup.bash' "${RC}"
-  assert_success
-}
 
 @test "color_git_branch sets PS1" {
   run grep -q "PS1=" "${RC}"
@@ -108,52 +57,32 @@ setup() {
 }
 
 # ════════════════════════════════════════════════════════════════════
-# _ros_auto_source behaviour — sandbox under mocked /opt/ros
+# bashrc.d drop-in bootstrap loop (template#254 v0.22.0)
 # ════════════════════════════════════════════════════════════════════
 
-@test "_ros_auto_source is silent when no ROS distro is installed" {
-  local _fake="$(mktemp -d)/opt/ros"
-  mkdir -p "${_fake}"
-  # Monkey-patch _ros_detect to look at our fake /opt/ros by overriding
-  # the for-loop glob via a wrapper function in a subshell.
-  run bash -c "
-    source '${RC}' >/dev/null 2>&1
-    _ros_detect() {
-      local d distro
-      for d in '${_fake}'/*/setup.bash; do
-        [[ -f \"\${d}\" ]] || continue
-        distro=\"\$(basename \"\$(dirname \"\${d}\")\")\"
-        case \" \${_ROS1_DISTROS} \" in *\" \${distro} \"*) echo \"ros1:\${distro}\" ;; esac
-        case \" \${_ROS2_DISTROS} \" in *\" \${distro} \"*) echo \"ros2:\${distro}\" ;; esac
-      done
-    }
-    _ros_auto_source
-  "
+@test "bashrc has bashrc.d bootstrap loop sourcing ~/.bashrc.d/*.sh" {
+  # Layered config + drop-in pattern: at interactive shell start,
+  # source any *.sh under ~/.bashrc.d/ so template-side helpers
+  # (from .base/config/shell/bashrc.d/) AND downstream-side
+  # helpers (from <repo>/config/shell/bashrc.d/) both get loaded.
+  run grep -qF 'for _bashrc_d_f in "${HOME}/.bashrc.d/"*.sh' "${RC}"
   assert_success
-  refute_output --partial "Multiple ROS"
-  refute_output --partial "sourced"
+  run grep -qF '[[ -r "${_bashrc_d_f}" ]] && source "${_bashrc_d_f}"' "${RC}"
+  assert_success
 }
 
-@test "_ros_auto_source warns when both ROS 1 and ROS 2 are installed" {
-  local _root; _root="$(mktemp -d)"
-  mkdir -p "${_root}/opt/ros/noetic" "${_root}/opt/ros/humble"
-  : > "${_root}/opt/ros/noetic/setup.bash"
-  : > "${_root}/opt/ros/humble/setup.bash"
-  run bash -c "
-    source '${RC}' >/dev/null 2>&1
-    _ros_detect() {
-      local d distro
-      for d in '${_root}'/opt/ros/*/setup.bash; do
-        [[ -f \"\${d}\" ]] || continue
-        distro=\"\$(basename \"\$(dirname \"\${d}\")\")\"
-        case \" \${_ROS1_DISTROS} \" in *\" \${distro} \"*) echo \"ros1:\${distro}\" ;; esac
-        case \" \${_ROS2_DISTROS} \" in *\" \${distro} \"*) echo \"ros2:\${distro}\" ;; esac
-      done
-    }
-    _ros_auto_source
-  "
+@test "bashrc.d bootstrap loop guards on directory existing" {
+  # Empty bashrc.d/ (or missing) must not error the bootstrap. The
+  # outer if guards the for loop; the inner [[ -r ]] guards the
+  # source call so a stray broken symlink doesn't tank shell start.
+  run grep -qF 'if [[ -d "${HOME}/.bashrc.d" ]]; then' "${RC}"
   assert_success
-  assert_output --partial "Multiple ROS versions detected"
-  assert_output --partial "ros1:noetic"
-  assert_output --partial "ros2:humble"
+}
+
+@test "bashrc.d/ directory exists in .base/config/shell/" {
+  # Empty placeholder so the dir exists in subtree (git doesn't
+  # track empty dirs). Template-side helpers can drop *.sh here
+  # later without touching Dockerfile.example.
+  assert [ -d "/source/config/shell/bashrc.d" ]
+  assert [ -f "/source/config/shell/bashrc.d/.gitkeep" ]
 }

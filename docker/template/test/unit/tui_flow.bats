@@ -38,6 +38,8 @@ setup() {
   # mutate state visibly to the parent. Each line: "<exit>|<response>".
   _QFILE="${BATS_TEST_TMPDIR}/tui_queue"
   : > "${_QFILE}"
+  # Post-#262 path: setup.conf lives at config/docker/setup.conf
+  mkdir -p "${BATS_TEST_TMPDIR}/config/docker"
 
   # Override the dialog primitives from _tui_backend.sh AFTER sourcing
   # setup_tui.sh, so our definitions win. (Top-level definitions in the
@@ -110,7 +112,7 @@ is_removed() {
 # ════════════════════════════════════════════════════════════════════
 
 @test "_load_current: pulls keys from repo conf when present" {
-  local _repo="${BATS_TEST_TMPDIR}/setup.conf"
+  local _repo="${BATS_TEST_TMPDIR}/config/docker/setup.conf"
   cat > "${_repo}" <<'EOF'
 [network]
 mode = bridge
@@ -120,7 +122,7 @@ EOF
 }
 
 @test "_load_current: falls back to template conf when repo conf missing" {
-  local _tpl="${BATS_TEST_TMPDIR}/setup.conf"
+  local _tpl="${BATS_TEST_TMPDIR}/config/docker/setup.conf"
   cat > "${_tpl}" <<'EOF'
 [deploy]
 gpu_mode = auto
@@ -158,10 +160,10 @@ EOF
 }
 
 @test "_render_main_menu: navigates into _edit_section_<choice> then Save" {
-  # First menu pick = network (dispatches into _edit_section_network),
-  # which immediately consumes the next two _tui_select responses
-  # (mode + ipc) to set them. Second pop after that = __save → exit.
-  queue "0|network" "0|host" "0|host" "0|__save"
+  # Post-#221: image is now a top-level main entry. Click image →
+  # _edit_section_image opens its rule-list menu (back immediately) →
+  # main loop pops __save → exit.
+  queue "0|image" "0|back" "0|__save"
   run _render_main_menu
   assert_success
 }
@@ -549,4 +551,394 @@ EOF
   _edit_section_deploy
   [[ "$(ovr_get deploy.gpu_mode)" == "off" ]]
   ! ovr_get deploy.gpu_count
+}
+
+# ════════════════════════════════════════════════════════════════════
+# Per-stage overrides UI (#220)
+# ════════════════════════════════════════════════════════════════════
+
+# Helper: stage a Dockerfile with the given non-baseline stages.
+# Returns the directory path on stdout so callers can pass it to
+# _list_dockerfile_stages_available's optional base-path arg —
+# FILE_PATH is readonly in setup_tui.sh, so tests can't override it.
+_make_dockerfile_with_stages() {
+  local _df="${BATS_TEST_TMPDIR}/Dockerfile"
+  {
+    echo 'FROM scratch AS sys'
+    echo 'FROM sys AS base'
+    echo 'FROM base AS devel'
+    local _s
+    for _s in "$@"; do
+      printf 'FROM devel AS %s\n' "${_s}"
+    done
+    echo 'FROM devel AS test'
+  } > "${_df}"
+  printf '%s' "${BATS_TEST_TMPDIR}"
+}
+
+@test "_list_dockerfile_stages_available: returns non-baseline stages in file order" {
+  local _base
+  _base="$(_make_dockerfile_with_stages headless gui web)"
+  local -a _out=()
+  _list_dockerfile_stages_available _out "${_base}"
+  [[ "${#_out[@]}" -eq 3 ]] || { echo "got ${_out[*]}"; return 1; }
+  [[ "${_out[0]}" == "headless" ]] || return 1
+  [[ "${_out[1]}" == "gui" ]] || return 1
+  [[ "${_out[2]}" == "web" ]] || return 1
+}
+
+@test "_list_dockerfile_stages_available: empty when only baseline stages" {
+  local _base
+  _base="$(_make_dockerfile_with_stages)"
+  local -a _out=()
+  _list_dockerfile_stages_available _out "${_base}"
+  [[ "${#_out[@]}" -eq 0 ]] || { echo "got ${_out[*]}"; return 1; }
+}
+
+@test "_count_stage_overrides: counts unique non-empty keys across OVR + CURRENT" {
+  _TUI_OVR_KEYS=("stage:headless.gui.mode" "stage:headless.network.mode")
+  _TUI_OVR_VALUES=("off" "bridge")
+  _TUI_CURRENT[stage:headless.volumes.mount_1]="/cache:/cache"
+  _TUI_CURRENT[stage:gui.gui.mode]="auto"
+  local _c
+  _count_stage_overrides headless _c
+  [[ "${_c}" -eq 3 ]] || { echo "expected 3, got ${_c}"; return 1; }
+  _count_stage_overrides gui _c
+  [[ "${_c}" -eq 1 ]] || { echo "expected 1, got ${_c}"; return 1; }
+  _count_stage_overrides web _c
+  [[ "${_c}" -eq 0 ]] || { echo "expected 0, got ${_c}"; return 1; }
+}
+
+@test "_count_stage_overrides: skips empty values" {
+  _TUI_OVR_KEYS=("stage:headless.gui.mode")
+  _TUI_OVR_VALUES=("")
+  local _c
+  _count_stage_overrides headless _c
+  [[ "${_c}" -eq 0 ]] || { echo "expected 0, got ${_c}"; return 1; }
+}
+
+@test "_edit_stage_gui: explicit mode write" {
+  _make_dockerfile_with_stages headless
+  queue "0|off"
+  _edit_stage_gui headless
+  [[ "$(ovr_get stage:headless.gui.mode)" == "off" ]] || {
+    echo "expected stage:headless.gui.mode=off, got: '$(ovr_get stage:headless.gui.mode || echo MISSING)'"
+    return 1
+  }
+}
+
+@test "_edit_stage_gui: __inherit clears any existing override" {
+  _make_dockerfile_with_stages headless
+  _TUI_OVR_KEYS=("stage:headless.gui.mode")
+  _TUI_OVR_VALUES=("force")
+  queue "0|__inherit"
+  _edit_stage_gui headless
+  ! ovr_get stage:headless.gui.mode
+  is_removed stage:headless.gui.mode
+}
+
+@test "_edit_stage_scalar: writes the dotted key under stage namespace" {
+  _make_dockerfile_with_stages headless
+  queue "0|bridge"
+  _edit_stage_scalar headless network.mode
+  [[ "$(ovr_get stage:headless.network.mode)" == "bridge" ]] || return 1
+}
+
+@test "_edit_stage_scalar: empty input clears (inherit)" {
+  _TUI_OVR_KEYS=("stage:headless.network.mode")
+  _TUI_OVR_VALUES=("bridge")
+  queue "0|"
+  _edit_stage_scalar headless network.mode
+  ! ovr_get stage:headless.network.mode
+}
+
+@test "_edit_stage_list: __inherit toggle flips false then back to true (clears flag)" {
+  _make_dockerfile_with_stages headless
+  # First toggle: default true → false
+  queue "0|__inherit" "0|__back"
+  _edit_stage_list headless volumes mount_ volumes.mount_inherit
+  [[ "$(ovr_get stage:headless.volumes.mount_inherit)" == "false" ]] || {
+    echo "1st toggle: expected false, got: '$(ovr_get stage:headless.volumes.mount_inherit || echo MISSING)'"
+    return 1
+  }
+  # Second toggle: false → true (which means CLEAR the override)
+  queue "0|__inherit" "0|__back"
+  _edit_stage_list headless volumes mount_ volumes.mount_inherit
+  ! ovr_get stage:headless.volumes.mount_inherit
+}
+
+@test "_edit_stage_list: add appends a list entry under the stage namespace" {
+  _make_dockerfile_with_stages headless
+  # Add → enter "/cache:/cache" → __back
+  queue "0|add" "0|/cache:/cache" "0|__back"
+  _edit_stage_list headless volumes mount_ volumes.mount_inherit
+  [[ "$(ovr_get stage:headless.volumes.mount_1)" == "/cache:/cache" ]] || {
+    echo "got: '$(ovr_get stage:headless.volumes.mount_1 || echo MISSING)'"
+    return 1
+  }
+}
+
+# ════════════════════════════════════════════════════════════════════
+# #221: Menu restructure — Runtime / Mounts / Features sub-menus
+#
+# Promotes image + build to top-level main, regroups runtime concerns
+# (network/deploy/gui/environment) under Runtime, regroups mount
+# concerns (volumes/devices/tmpfs) under Mounts, and adds a Features
+# entry that exposes conditional/power-user features even when their
+# enabling preconditions are not met (per-stage overrides being the
+# first such feature). Advanced sub-menu is slimmed to truly-advanced
+# entries: security, additional_contexts, per_stage (conditional),
+# Reset to defaults.
+# ════════════════════════════════════════════════════════════════════
+
+# i18n keys for new top-level entries
+
+@test "i18n: main.runtime key exists across all 4 languages" {
+  [[ -n "${_TUI_MSG_EN[main.runtime]:-}" ]]
+  [[ -n "${_TUI_MSG_ZH_TW[main.runtime]:-}" ]]
+  [[ -n "${_TUI_MSG_ZH_CN[main.runtime]:-}" ]]
+  [[ -n "${_TUI_MSG_JA[main.runtime]:-}" ]]
+}
+
+@test "i18n: main.mounts key exists across all 4 languages" {
+  [[ -n "${_TUI_MSG_EN[main.mounts]:-}" ]]
+  [[ -n "${_TUI_MSG_ZH_TW[main.mounts]:-}" ]]
+  [[ -n "${_TUI_MSG_ZH_CN[main.mounts]:-}" ]]
+  [[ -n "${_TUI_MSG_JA[main.mounts]:-}" ]]
+}
+
+@test "i18n: main.features key exists across all 4 languages" {
+  [[ -n "${_TUI_MSG_EN[main.features]:-}" ]]
+  [[ -n "${_TUI_MSG_ZH_TW[main.features]:-}" ]]
+  [[ -n "${_TUI_MSG_ZH_CN[main.features]:-}" ]]
+  [[ -n "${_TUI_MSG_JA[main.features]:-}" ]]
+}
+
+# New sub-menu function existence
+
+@test "_render_runtime_menu function is defined" {
+  [[ "$(type -t _render_runtime_menu)" == "function" ]]
+}
+
+@test "_render_mounts_menu function is defined" {
+  [[ "$(type -t _render_mounts_menu)" == "function" ]]
+}
+
+@test "_render_features_menu function is defined" {
+  [[ "$(type -t _render_features_menu)" == "function" ]]
+}
+
+# Main menu dispatch — image + build promoted to top level
+
+@test "_render_main_menu: image choice dispatches to _edit_section_image" {
+  local _called=0
+  _edit_section_image() { _called=1; }
+  queue "0|image" "0|__save"
+  _render_main_menu
+  [[ "${_called}" -eq 1 ]]
+}
+
+@test "_render_main_menu: build choice dispatches to _edit_section_build" {
+  local _called=0
+  _edit_section_build() { _called=1; }
+  queue "0|build" "0|__save"
+  _render_main_menu
+  [[ "${_called}" -eq 1 ]]
+}
+
+@test "_render_main_menu: runtime choice dispatches to _render_runtime_menu" {
+  local _called=0
+  _render_runtime_menu() { _called=1; }
+  queue "0|runtime" "0|__save"
+  _render_main_menu
+  [[ "${_called}" -eq 1 ]]
+}
+
+@test "_render_main_menu: mounts choice dispatches to _render_mounts_menu" {
+  local _called=0
+  _render_mounts_menu() { _called=1; }
+  queue "0|mounts" "0|__save"
+  _render_main_menu
+  [[ "${_called}" -eq 1 ]]
+}
+
+@test "_render_main_menu: features choice dispatches to _render_features_menu" {
+  local _called=0
+  _render_features_menu() { _called=1; }
+  queue "0|features" "0|__save"
+  _render_main_menu
+  [[ "${_called}" -eq 1 ]]
+}
+
+@test "_render_main_menu: bare network/deploy/gui/volumes/environment no longer dispatch from main" {
+  # Post-#221 these live under Runtime / Mounts sub-menus. If a stale
+  # script keys them, no editor opens (no case branch matches), and
+  # the main loop simply continues until __save / Cancel.
+  local _net=0 _gui=0 _vol=0
+  _edit_section_network() { _net=1; }
+  _edit_section_gui()     { _gui=1; }
+  _edit_section_volumes() { _vol=1; }
+  queue "0|network" "0|gui" "0|volumes" "0|__save"
+  _render_main_menu
+  [[ "${_net}" -eq 0 && "${_gui}" -eq 0 && "${_vol}" -eq 0 ]]
+}
+
+# Runtime sub-menu
+
+@test "_render_runtime_menu: __back exits with 0" {
+  queue "0|__back"
+  run _render_runtime_menu
+  assert_success
+}
+
+@test "_render_runtime_menu: Cancel (rc!=0) exits via break" {
+  queue "1|"
+  run _render_runtime_menu
+  assert_success
+}
+
+@test "_render_runtime_menu: network choice dispatches to _edit_section_network" {
+  local _called=0
+  _edit_section_network() { _called=1; }
+  queue "0|network" "0|__back"
+  _render_runtime_menu
+  [[ "${_called}" -eq 1 ]]
+}
+
+@test "_render_runtime_menu: deploy choice dispatches to _edit_section_deploy" {
+  local _called=0
+  _edit_section_deploy() { _called=1; }
+  queue "0|deploy" "0|__back"
+  _render_runtime_menu
+  [[ "${_called}" -eq 1 ]]
+}
+
+@test "_render_runtime_menu: gui choice dispatches to _edit_section_gui" {
+  local _called=0
+  _edit_section_gui() { _called=1; }
+  queue "0|gui" "0|__back"
+  _render_runtime_menu
+  [[ "${_called}" -eq 1 ]]
+}
+
+@test "_render_runtime_menu: environment choice dispatches to _edit_section_environment" {
+  local _called=0
+  _edit_section_environment() { _called=1; }
+  queue "0|environment" "0|__back"
+  _render_runtime_menu
+  [[ "${_called}" -eq 1 ]]
+}
+
+# Mounts sub-menu
+
+@test "_render_mounts_menu: __back exits with 0" {
+  queue "0|__back"
+  run _render_mounts_menu
+  assert_success
+}
+
+@test "_render_mounts_menu: Cancel (rc!=0) exits via break" {
+  queue "1|"
+  run _render_mounts_menu
+  assert_success
+}
+
+@test "_render_mounts_menu: volumes choice dispatches to _edit_section_volumes" {
+  local _called=0
+  _edit_section_volumes() { _called=1; }
+  queue "0|volumes" "0|__back"
+  _render_mounts_menu
+  [[ "${_called}" -eq 1 ]]
+}
+
+@test "_render_mounts_menu: devices choice dispatches to _edit_section_devices" {
+  local _called=0
+  _edit_section_devices() { _called=1; }
+  queue "0|devices" "0|__back"
+  _render_mounts_menu
+  [[ "${_called}" -eq 1 ]]
+}
+
+@test "_render_mounts_menu: tmpfs choice dispatches to _edit_section_tmpfs" {
+  local _called=0
+  _edit_section_tmpfs() { _called=1; }
+  queue "0|tmpfs" "0|__back"
+  _render_mounts_menu
+  [[ "${_called}" -eq 1 ]]
+}
+
+# Features sub-menu — conditional discoverability (#221 acceptance)
+
+@test "_render_features_menu: __back exits with 0" {
+  queue "0|__back"
+  run _render_features_menu
+  assert_success
+}
+
+@test "_render_features_menu: per_stage entry enters editor when stages exist" {
+  # When non-baseline stages are present, clicking per_stage opens
+  # _edit_section_per_stage (the existing editor — same entry point as
+  # the conditional Advanced entry).
+  local _base _called=0
+  _base="$(_make_dockerfile_with_stages headless)"
+  _edit_section_per_stage() { _called=1; }
+  queue "0|per_stage" "0|__back"
+  _render_features_menu "${_base}"
+  [[ "${_called}" -eq 1 ]]
+}
+
+@test "_render_features_menu: per_stage entry shows info msgbox + does NOT enter editor when no stages" {
+  # When no non-baseline stages exist, clicking per_stage shows an
+  # explanatory msgbox + returns; editor must not be entered.
+  local _base _editor=0 _msgbox=0
+  _base="$(_make_dockerfile_with_stages)"
+  _edit_section_per_stage() { _editor=1; }
+  _tui_msgbox() { _msgbox=1; return 0; }
+  export -f _tui_msgbox
+  queue "0|per_stage" "0|__back"
+  _render_features_menu "${_base}"
+  [[ "${_editor}" -eq 0 ]]
+  [[ "${_msgbox}" -eq 1 ]]
+}
+
+# Advanced sub-menu — image/build/devices/tmpfs moved out (#221)
+
+@test "_render_advanced_menu: image entry no longer dispatches" {
+  local _called=0
+  _edit_section_image() { _called=1; }
+  queue "0|image" "0|__back"
+  _render_advanced_menu
+  [[ "${_called}" -eq 0 ]]
+}
+
+@test "_render_advanced_menu: build entry no longer dispatches" {
+  local _called=0
+  _edit_section_build() { _called=1; }
+  queue "0|build" "0|__back"
+  _render_advanced_menu
+  [[ "${_called}" -eq 0 ]]
+}
+
+@test "_render_advanced_menu: devices entry no longer dispatches" {
+  local _called=0
+  _edit_section_devices() { _called=1; }
+  queue "0|devices" "0|__back"
+  _render_advanced_menu
+  [[ "${_called}" -eq 0 ]]
+}
+
+@test "_render_advanced_menu: tmpfs entry no longer dispatches" {
+  local _called=0
+  _edit_section_tmpfs() { _called=1; }
+  queue "0|tmpfs" "0|__back"
+  _render_advanced_menu
+  [[ "${_called}" -eq 0 ]]
+}
+
+@test "_render_advanced_menu: security still dispatches" {
+  local _called=0
+  _edit_section_security() { _called=1; }
+  queue "0|security" "0|__back"
+  _render_advanced_menu
+  [[ "${_called}" -eq 1 ]]
 }

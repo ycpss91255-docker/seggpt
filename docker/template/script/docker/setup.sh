@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # setup.sh - Auto-detect system parameters and generate .env + compose.yaml
 #
-# Reads <repo>/setup.conf (or template/setup.conf default) for the repo's
+# Reads <repo>/setup.conf (or .base/setup.conf default) for the repo's
 # runtime configuration ([image] rules, [build] apt_mirror, [deploy] GPU,
 # [gui], [network], [volumes]), runs system detection (UID/GID, hardware,
 # docker hub user, GPU, GUI, workspace path), then emits:
@@ -15,7 +15,7 @@
 # Usage: setup.sh [-h|--help] [--base-path <path>] [--lang en|zh-TW|zh-CN|ja]
 
 # ── i18n messages ──────────────────────────────────────────────
-# Resolve the symlink (<repo>/setup.sh → template/script/docker/setup.sh)
+# Resolve the symlink (<repo>/setup.sh → .base/script/docker/setup.sh)
 # so sibling sources (i18n.sh / _tui_conf.sh) are located in the
 # template directory regardless of how the script was invoked.
 _SETUP_SELF="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
@@ -24,108 +24,158 @@ _SETUP_SCRIPT_DIR="$(cd -- "$(dirname -- "${_SETUP_SELF}")" && pwd -P)"
 source "${_SETUP_SCRIPT_DIR}/i18n.sh"
 # shellcheck disable=SC1091
 source "${_SETUP_SCRIPT_DIR}/_tui_conf.sh"
+# _lib.sh provides _log_err / _log_warn / _log_info (#278). Sourcing
+# here makes them available throughout setup.sh's emission paths after
+# the #290 refactor that routes user-facing output through the
+# log-helper family instead of raw `printf "[setup] LEVEL: ..."` lines.
+# _lib.sh is idempotent (guarded by _DOCKER_LIB_SOURCED); its
+# transitive i18n.sh source is a no-op redefinition since we already
+# sourced i18n.sh above.
+# shellcheck disable=SC1091
+source "${_SETUP_SCRIPT_DIR}/_lib.sh"
 
-# Renamed from `_msg` to `_setup_msg` (closes #101) so sourcing this
-# file from build.sh / run.sh doesn't silently shadow their own
-# top-level `_msg()` (which carries different keys like
-# drift_regen / err_no_env / err_rerun_setup). The shadowed key
-# lookup would silently return empty — `printf "%s\n" ""` ate the
-# drift-regen status line on every fresh-host / setup.conf-changed
-# run. Defensive namespacing fixes the class of bug for setup.sh's
-# internal i18n table; future helpers added to setup.sh should
-# follow the `_setup_*` prefix convention.
-_setup_msg() {
-  local _key="${1}"
-  case "${_LANG}" in
-    zh-TW)
-      case "${_key}" in
-        env_done)         echo ".env 與 compose.yaml 更新完成" ;;
-        env_comment)      echo "自動偵測欄位請勿手動修改，如需變更 WS_PATH 可直接編輯此檔案" ;;
-        unknown_arg)      echo "未知參數" ;;
-        unknown_subcmd)   echo "未知子指令" ;;
-        unknown_section)  echo "未知 section" ;;
-        invalid_value)    echo "無效的值" ;;
-        key_not_found)    echo "找不到鍵" ;;
-        section_not_found) echo "找不到 section" ;;
-        usage_set)        echo "用法: setup.sh set <section>.<key> <value> [--base-path PATH] [--lang LANG]" ;;
-        usage_show)       echo "用法: setup.sh show <section>[.<key>] [--base-path PATH] [--lang LANG]" ;;
-        usage_list)       echo "用法: setup.sh list [<section>] [--base-path PATH] [--lang LANG]" ;;
-        usage_add)        echo "用法: setup.sh add <section>.<list> <value> [--base-path PATH] [--lang LANG]" ;;
-        usage_remove)     echo "用法: setup.sh remove <section>.<key> | <section>.<list> <value> [--base-path PATH] [--lang LANG]" ;;
-        reset_confirm)    echo "將以模板預設值覆寫 setup.conf（舊檔備份為 setup.conf.bak / .env.bak）。繼續嗎？" ;;
-        reset_aborted)    echo "已取消，未變更任何檔案" ;;
-        reset_done)       echo "setup.conf 已重設為模板預設值（先前內容備份於 .bak）" ;;
-        reset_needs_yes)  echo "非互動模式：請加 --yes 才會執行 reset（避免誤刪）" ;;
-        warn_no_repo_conf) echo "未找到 repo 自有的 setup.conf — 全部 section 將使用模板預設值" ;;
-        warn_empty_repo_conf) echo "repo 的 setup.conf 沒有任何 section 覆寫 — 全部 section 將使用模板預設值" ;;
-      esac ;;
-    zh-CN)
-      case "${_key}" in
-        env_done)         echo ".env 与 compose.yaml 更新完成" ;;
-        env_comment)      echo "自动检测字段请勿手动修改，如需变更 WS_PATH 可直接编辑此文件" ;;
-        unknown_arg)      echo "未知参数" ;;
-        unknown_subcmd)   echo "未知子命令" ;;
-        unknown_section)  echo "未知 section" ;;
-        invalid_value)    echo "无效的值" ;;
-        key_not_found)    echo "找不到键" ;;
-        section_not_found) echo "找不到 section" ;;
-        usage_set)        echo "用法: setup.sh set <section>.<key> <value> [--base-path PATH] [--lang LANG]" ;;
-        usage_show)       echo "用法: setup.sh show <section>[.<key>] [--base-path PATH] [--lang LANG]" ;;
-        usage_list)       echo "用法: setup.sh list [<section>] [--base-path PATH] [--lang LANG]" ;;
-        usage_add)        echo "用法: setup.sh add <section>.<list> <value> [--base-path PATH] [--lang LANG]" ;;
-        usage_remove)     echo "用法: setup.sh remove <section>.<key> | <section>.<list> <value> [--base-path PATH] [--lang LANG]" ;;
-        reset_confirm)    echo "将以模板默认值覆写 setup.conf（旧文件备份为 setup.conf.bak / .env.bak）。继续吗？" ;;
-        reset_aborted)    echo "已取消，未更改任何文件" ;;
-        reset_done)       echo "setup.conf 已重置为模板默认值（之前内容备份至 .bak）" ;;
-        reset_needs_yes)  echo "非交互模式：请加 --yes 才会执行 reset（避免误删）" ;;
-        warn_no_repo_conf) echo "未找到 repo 自有的 setup.conf — 全部 section 将使用模板默认值" ;;
-        warn_empty_repo_conf) echo "repo 的 setup.conf 没有任何 section 覆写 — 全部 section 将使用模板默认值" ;;
-      esac ;;
-    ja)
-      case "${_key}" in
-        env_done)         echo ".env と compose.yaml 更新完了" ;;
-        env_comment)      echo "自動検出フィールドは手動で編集しないでください。WS_PATH の変更はこのファイルを直接編集してください" ;;
-        unknown_arg)      echo "不明な引数" ;;
-        unknown_subcmd)   echo "不明なサブコマンド" ;;
-        unknown_section)  echo "不明な section" ;;
-        invalid_value)    echo "無効な値" ;;
-        key_not_found)    echo "キーが見つかりません" ;;
-        section_not_found) echo "section が見つかりません" ;;
-        usage_set)        echo "使い方: setup.sh set <section>.<key> <value> [--base-path PATH] [--lang LANG]" ;;
-        usage_show)       echo "使い方: setup.sh show <section>[.<key>] [--base-path PATH] [--lang LANG]" ;;
-        usage_list)       echo "使い方: setup.sh list [<section>] [--base-path PATH] [--lang LANG]" ;;
-        usage_add)        echo "使い方: setup.sh add <section>.<list> <value> [--base-path PATH] [--lang LANG]" ;;
-        usage_remove)     echo "使い方: setup.sh remove <section>.<key> | <section>.<list> <value> [--base-path PATH] [--lang LANG]" ;;
-        reset_confirm)    echo "テンプレートのデフォルト値で setup.conf を上書きします（旧ファイルは setup.conf.bak / .env.bak にバックアップ）。続行しますか？" ;;
-        reset_aborted)    echo "中断されました。ファイルは変更されていません" ;;
-        reset_done)       echo "setup.conf をテンプレートのデフォルトにリセットしました（旧内容は .bak に保存）" ;;
-        reset_needs_yes)  echo "非対話モード: --yes を指定しないと reset は実行されません（誤削除防止）" ;;
-        warn_no_repo_conf) echo "repo 固有の setup.conf が見つかりません — 全ての section でテンプレートのデフォルト値を使用します" ;;
-        warn_empty_repo_conf) echo "repo の setup.conf にセクション上書きがありません — 全ての section でテンプレートのデフォルト値を使用します" ;;
-      esac ;;
-    *)
-      case "${_key}" in
-        env_done)         echo ".env + compose.yaml updated" ;;
-        env_comment)      echo "Auto-detected fields, do not edit manually. Edit WS_PATH if needed" ;;
-        unknown_arg)      echo "Unknown argument" ;;
-        unknown_subcmd)   echo "Unknown subcommand" ;;
-        unknown_section)  echo "Unknown section" ;;
-        invalid_value)    echo "Invalid value" ;;
-        key_not_found)    echo "Key not found" ;;
-        section_not_found) echo "Section not found" ;;
-        usage_set)        echo "Usage: setup.sh set <section>.<key> <value> [--base-path PATH] [--lang LANG]" ;;
-        usage_show)       echo "Usage: setup.sh show <section>[.<key>] [--base-path PATH] [--lang LANG]" ;;
-        usage_list)       echo "Usage: setup.sh list [<section>] [--base-path PATH] [--lang LANG]" ;;
-        usage_add)        echo "Usage: setup.sh add <section>.<list> <value> [--base-path PATH] [--lang LANG]" ;;
-        usage_remove)     echo "Usage: setup.sh remove <section>.<key> | <section>.<list> <value> [--base-path PATH] [--lang LANG]" ;;
-        reset_confirm)    echo "Overwrite setup.conf with template default? (prior setup.conf → .bak, prior .env → .env.bak)" ;;
-        reset_aborted)    echo "Aborted; no files changed" ;;
-        reset_done)       echo "setup.conf reset to template default (prior contents saved to .bak)" ;;
-        reset_needs_yes)  echo "Non-interactive: pass --yes to confirm reset (prevents accidental destruction)" ;;
-        warn_no_repo_conf) echo "no per-repo setup.conf — using template defaults for all sections" ;;
-        warn_empty_repo_conf) echo "per-repo setup.conf has no section overrides — using template defaults for all sections" ;;
-      esac ;;
+# i18n message table, split per category and routed through _log_*
+# (closes #290). Renamed from a monolithic `_msg` to `_setup_msg`
+# (closes #101) so sourcing this file from build.sh / run.sh doesn't
+# silently shadow their own top-level `_msg()`. The category split
+# mirrors #278 PR-2 (which did the same for build/run/exec/stop):
+# each _setup_msg_<category> returns plain i18n body only; tag +
+# LEVEL keyword are added by the _log_* caller (English-only; level
+# keyword no longer translated — see #283).
+
+_setup_msg_env() {
+  case "${_LANG}:${1:?}" in
+    zh-TW:done)     echo ".env 與 compose.yaml 更新完成" ;;
+    zh-CN:done)     echo ".env 与 compose.yaml 更新完成" ;;
+    ja:done)        echo ".env と compose.yaml 更新完了" ;;
+    *:done)         echo ".env + compose.yaml updated" ;;
+    zh-TW:comment)  echo "自動偵測欄位請勿手動修改，如需變更 WS_PATH 可直接編輯此檔案" ;;
+    zh-CN:comment)  echo "自动检测字段请勿手动修改，如需变更 WS_PATH 可直接编辑此文件" ;;
+    ja:comment)     echo "自動検出フィールドは手動で編集しないでください。WS_PATH の変更はこのファイルを直接編集してください" ;;
+    *:comment)      echo "Auto-detected fields, do not edit manually. Edit WS_PATH if needed" ;;
   esac
+}
+
+_setup_msg_errors() {
+  case "${_LANG}:${1:?}" in
+    zh-TW:unknown_arg)       echo "未知參數" ;;
+    zh-CN:unknown_arg)       echo "未知参数" ;;
+    ja:unknown_arg)          echo "不明な引数" ;;
+    *:unknown_arg)           echo "Unknown argument" ;;
+    zh-TW:unknown_subcmd)    echo "未知子指令" ;;
+    zh-CN:unknown_subcmd)    echo "未知子命令" ;;
+    ja:unknown_subcmd)       echo "不明なサブコマンド" ;;
+    *:unknown_subcmd)        echo "Unknown subcommand" ;;
+    zh-TW:unknown_section)   echo "未知 section" ;;
+    zh-CN:unknown_section)   echo "未知 section" ;;
+    ja:unknown_section)      echo "不明な section" ;;
+    *:unknown_section)       echo "Unknown section" ;;
+    zh-TW:invalid_value)     echo "無效的值" ;;
+    zh-CN:invalid_value)     echo "无效的值" ;;
+    ja:invalid_value)        echo "無効な値" ;;
+    *:invalid_value)         echo "Invalid value" ;;
+    zh-TW:key_not_found)     echo "找不到鍵" ;;
+    zh-CN:key_not_found)     echo "找不到键" ;;
+    ja:key_not_found)        echo "キーが見つかりません" ;;
+    *:key_not_found)         echo "Key not found" ;;
+    zh-TW:section_not_found) echo "找不到 section" ;;
+    zh-CN:section_not_found) echo "找不到 section" ;;
+    ja:section_not_found)    echo "section が見つかりません" ;;
+    *:section_not_found)     echo "Section not found" ;;
+  esac
+}
+
+_setup_msg_warnings() {
+  case "${_LANG}:${1:?}" in
+    zh-TW:no_repo_conf)    echo "未找到 repo 自有的 setup.conf — 全部 section 將使用模板預設值" ;;
+    zh-CN:no_repo_conf)    echo "未找到 repo 自有的 setup.conf — 全部 section 将使用模板默认值" ;;
+    ja:no_repo_conf)       echo "repo 固有の setup.conf が見つかりません — 全ての section でテンプレートのデフォルト値を使用します" ;;
+    *:no_repo_conf)        echo "no per-repo setup.conf — using template defaults for all sections" ;;
+    zh-TW:empty_repo_conf) echo "repo 的 setup.conf 沒有任何 section 覆寫 — 全部 section 將使用模板預設值" ;;
+    zh-CN:empty_repo_conf) echo "repo 的 setup.conf 没有任何 section 覆写 — 全部 section 将使用模板默认值" ;;
+    ja:empty_repo_conf)    echo "repo の setup.conf にセクション上書きがありません — 全ての section でテンプレートのデフォルト値を使用します" ;;
+    *:empty_repo_conf)     echo "per-repo setup.conf has no section overrides — using template defaults for all sections" ;;
+  esac
+}
+
+# usage_* messages are short subcommand-usage hints printed directly
+# (no [setup] / LEVEL prefix) — they are help text, not log lines.
+_setup_msg_usage() {
+  case "${_LANG}:${1:?}" in
+    zh-TW:set)    echo "用法: setup.sh set <section>.<key> <value> [--base-path PATH] [--lang LANG]" ;;
+    zh-CN:set)    echo "用法: setup.sh set <section>.<key> <value> [--base-path PATH] [--lang LANG]" ;;
+    ja:set)       echo "使い方: setup.sh set <section>.<key> <value> [--base-path PATH] [--lang LANG]" ;;
+    *:set)        echo "Usage: setup.sh set <section>.<key> <value> [--base-path PATH] [--lang LANG]" ;;
+    zh-TW:show)   echo "用法: setup.sh show <section>[.<key>] [--base-path PATH] [--lang LANG]" ;;
+    zh-CN:show)   echo "用法: setup.sh show <section>[.<key>] [--base-path PATH] [--lang LANG]" ;;
+    ja:show)      echo "使い方: setup.sh show <section>[.<key>] [--base-path PATH] [--lang LANG]" ;;
+    *:show)       echo "Usage: setup.sh show <section>[.<key>] [--base-path PATH] [--lang LANG]" ;;
+    zh-TW:list)   echo "用法: setup.sh list [<section>] [--base-path PATH] [--lang LANG]" ;;
+    zh-CN:list)   echo "用法: setup.sh list [<section>] [--base-path PATH] [--lang LANG]" ;;
+    ja:list)      echo "使い方: setup.sh list [<section>] [--base-path PATH] [--lang LANG]" ;;
+    *:list)       echo "Usage: setup.sh list [<section>] [--base-path PATH] [--lang LANG]" ;;
+    zh-TW:add)    echo "用法: setup.sh add <section>.<list> <value> [--base-path PATH] [--lang LANG]" ;;
+    zh-CN:add)    echo "用法: setup.sh add <section>.<list> <value> [--base-path PATH] [--lang LANG]" ;;
+    ja:add)       echo "使い方: setup.sh add <section>.<list> <value> [--base-path PATH] [--lang LANG]" ;;
+    *:add)        echo "Usage: setup.sh add <section>.<list> <value> [--base-path PATH] [--lang LANG]" ;;
+    zh-TW:remove) echo "用法: setup.sh remove <section>.<key> | <section>.<list> <value> [--base-path PATH] [--lang LANG]" ;;
+    zh-CN:remove) echo "用法: setup.sh remove <section>.<key> | <section>.<list> <value> [--base-path PATH] [--lang LANG]" ;;
+    ja:remove)    echo "使い方: setup.sh remove <section>.<key> | <section>.<list> <value> [--base-path PATH] [--lang LANG]" ;;
+    *:remove)     echo "Usage: setup.sh remove <section>.<key> | <section>.<list> <value> [--base-path PATH] [--lang LANG]" ;;
+  esac
+}
+
+_setup_msg_reset() {
+  case "${_LANG}:${1:?}" in
+    zh-TW:confirm)   echo "將以模板預設值覆寫 setup.conf（舊檔備份為 setup.conf.bak / .env.bak）。繼續嗎？" ;;
+    zh-CN:confirm)   echo "将以模板默认值覆写 setup.conf（旧文件备份为 setup.conf.bak / .env.bak）。继续吗？" ;;
+    ja:confirm)      echo "テンプレートのデフォルト値で setup.conf を上書きします（旧ファイルは setup.conf.bak / .env.bak にバックアップ）。続行しますか？" ;;
+    *:confirm)       echo "Overwrite setup.conf with template default? (prior setup.conf → .bak, prior .env → .env.bak)" ;;
+    zh-TW:aborted)   echo "已取消，未變更任何檔案" ;;
+    zh-CN:aborted)   echo "已取消，未更改任何文件" ;;
+    ja:aborted)      echo "中断されました。ファイルは変更されていません" ;;
+    *:aborted)       echo "Aborted; no files changed" ;;
+    zh-TW:done)      echo "setup.conf 已重設為模板預設值（先前內容備份於 .bak）" ;;
+    zh-CN:done)      echo "setup.conf 已重置为模板默认值（之前内容备份至 .bak）" ;;
+    ja:done)         echo "setup.conf をテンプレートのデフォルトにリセットしました（旧内容は .bak に保存）" ;;
+    *:done)          echo "setup.conf reset to template default (prior contents saved to .bak)" ;;
+    zh-TW:needs_yes) echo "非互動模式：請加 --yes 才會執行 reset（避免誤刪）" ;;
+    zh-CN:needs_yes) echo "非交互模式：请加 --yes 才会执行 reset（避免误删）" ;;
+    ja:needs_yes)    echo "非対話モード: --yes を指定しないと reset は実行されません（誤削除防止）" ;;
+    *:needs_yes)     echo "Non-interactive: pass --yes to confirm reset (prevents accidental destruction)" ;;
+  esac
+}
+
+_setup_msg_stage() {
+  case "${_LANG}:${1:?}" in
+    zh-TW:invalid_format)           echo "Dockerfile stage 名稱格式無效，已跳過該 stage" ;;
+    zh-CN:invalid_format)           echo "Dockerfile stage 名称格式无效，已跳过该 stage" ;;
+    ja:invalid_format)              echo "Dockerfile stage 名のフォーマットが無効です。該当 stage はスキップされます" ;;
+    *:invalid_format)               echo "invalid Dockerfile stage name format; stage skipped" ;;
+    zh-TW:baseline_collision)       echo "Dockerfile stage 名稱與 template 內建 stage 衝突，請改名" ;;
+    zh-CN:baseline_collision)       echo "Dockerfile stage 名称与 template 内建 stage 冲突，请改名" ;;
+    ja:baseline_collision)          echo "Dockerfile stage 名が template 管理の stage と衝突しています。改名してください" ;;
+    *:baseline_collision)           echo "Dockerfile stage name collides with a template-managed baseline stage; rename it" ;;
+    zh-TW:reserved_tag)             echo "Dockerfile stage 名稱使用 template 控制的 image tag namespace，請改名" ;;
+    zh-CN:reserved_tag)             echo "Dockerfile stage 名称使用 template 控制的 image tag namespace，请改名" ;;
+    ja:reserved_tag)                echo "Dockerfile stage 名が template が管理する image tag namespace を使用しています。改名してください" ;;
+    *:reserved_tag)                 echo "Dockerfile stage name uses a template-controlled image tag namespace; rename it" ;;
+    zh-TW:unknown_referenced)       echo "setup.conf 內 [stage:...] 對應的 stage 在 Dockerfile 中不存在，已忽略該區段" ;;
+    zh-CN:unknown_referenced)       echo "setup.conf 内 [stage:...] 对应的 stage 在 Dockerfile 中不存在，已忽略该区段" ;;
+    ja:unknown_referenced)          echo "setup.conf 内の [stage:...] が指す stage が Dockerfile に存在しません。該当セクションは無視されます" ;;
+    *:unknown_referenced)           echo "setup.conf [stage:...] references a stage missing from the Dockerfile; section ignored" ;;
+    zh-TW:override_key_not_allowed) echo "[stage:...] 區段內含不在 per-stage 允許清單內的 key，已忽略該 key" ;;
+    zh-CN:override_key_not_allowed) echo "[stage:...] 区段内含不在 per-stage 允许清单内的 key，已忽略该 key" ;;
+    ja:override_key_not_allowed)    echo "[stage:...] セクション内に per-stage 許可リスト外の key が含まれています。該当 key は無視されます" ;;
+    *:override_key_not_allowed)     echo "[stage:...] section contains a key outside the per-stage allowlist; key ignored" ;;
+  esac
+}
+
+# Dispatcher — keeps a single _setup_msg call shape across the script.
+_setup_msg() {
+  local _category="${1:?_setup_msg requires category}"
+  local _key="${2:?_setup_msg requires key}"
+  "_setup_msg_${_category}" "${_key}"
 }
 
 # Only set strict mode when running directly; when sourced, respect caller's settings
@@ -157,7 +207,7 @@ Subcommands:
                 drift descriptions on stderr) when regen is needed.
                 Used by build.sh / run.sh to decide auto-regen.
   set <section>.<key> <value>
-                Write a single value into <base-path>/setup.conf
+                Write a single value into <base-path>/config/docker/setup.conf
                 (creates the section / key if missing). Validates
                 known typed keys (deploy.gpu_count / volumes.mount_*
                 / devices.cgroup_rule_* / network.port_* /
@@ -187,10 +237,15 @@ Subcommands:
 Options:
   -h, --help            Show this help and exit.
   --base-path PATH      Repo root to operate on. Defaults to the repo
-                        containing this script (template/../..).
+                        containing this script (.base/../..).
   --lang LANG           Set message language (en|zh-TW|zh-CN|ja).
                         Defaults to $SETUP_LANG or auto-detected from
                         $LANG.
+  -q, --quiet           Suppress the success-confirmation lines on
+                        set / add / remove / reset / apply. Errors
+                        still go to stderr. Used by setup_tui.sh to
+                        avoid double-printing after its `[tui] saved`
+                        line.
 
 Outputs (apply only — both derived artifacts, gitignored):
   <base-path>/.env          Exported variables + SETUP_* drift metadata
@@ -314,7 +369,7 @@ detect_gui() {
 #
 # Reads one section [<section>] from <file> into parallel arrays.
 # Skips comments (#) and empty lines. Trims key/value whitespace.
-# If a key is defined both in <base_path>/setup.conf and in template/setup.conf,
+# If a key is defined both in <base_path>/setup.conf and in .base/setup.conf,
 # caller should use _load_setup_conf which handles the merge (replace strategy).
 _parse_ini_section() {
   local _file="${1:?"${FUNCNAME[0]}: missing file"}"
@@ -367,7 +422,7 @@ _parse_ini_section() {
 #
 # #201: collapsed back to 2-file model. <repo>/setup.conf is the user
 # override (committed, not gitignored, survives template upgrade because
-# template subtree pull never touches it — it lives outside template/).
+# template subtree pull never touches it — it lives outside .base/).
 _load_setup_conf() {
   local _base="${1:?"${FUNCNAME[0]}: missing base_path"}"
   local _section="${2:?"${FUNCNAME[0]}: missing section"}"
@@ -381,8 +436,8 @@ _load_setup_conf() {
   fi
 
   local _self_dir="${_SETUP_SCRIPT_DIR}"
-  local _template_conf="${_self_dir}/../../setup.conf"
-  local _repo_conf="${_base}/setup.conf"
+  local _template_conf="${_self_dir}/../../config/docker/setup.conf"
+  local _repo_conf="${_base}/config/docker/setup.conf"
 
   # Try per-repo setup.conf first; if the section exists there, use it.
   if [[ -f "${_repo_conf}" ]]; then
@@ -799,8 +854,8 @@ _compute_conf_hash() {
   local _base="${1:?}"
   local -n _cch_out="${2:?}"
   local _self_dir="${_SETUP_SCRIPT_DIR}"
-  local _template_conf="${_self_dir}/../../setup.conf"
-  local _repo_conf="${_base}/setup.conf"
+  local _template_conf="${_self_dir}/../../config/docker/setup.conf"
+  local _repo_conf="${_base}/config/docker/setup.conf"
 
   # Use command substitution (not pipe-into-block) so the nameref
   # assignment happens in the function's scope, not a subshell.
@@ -818,6 +873,403 @@ _compute_conf_hash() {
 }
 
 # ════════════════════════════════════════════════════════════════════
+# Stage helpers (#215)
+# ════════════════════════════════════════════════════════════════════
+
+# _validate_stage_name <stage>
+#
+# Returns:
+#   0 — valid; auto-emit as compose service
+#   1 — invalid format (caller WARNs + skips, continues parsing other stages)
+#   2 — collides with template-managed baseline
+#       {sys, devel-base, devel, devel-test, runtime-test}; hard error
+#       (caller exits non-zero). For backward compatibility during the
+#       v0.21.x transition the legacy names {base, test} are also
+#       accepted as baseline (downstream Dockerfiles renamed to
+#       devel-base / devel-test over a coordinated rollout); they will
+#       be removed from the blocklist in a future major release.
+#   3 — collides with template-controlled image-tag namespace
+#       ({latest} | v[0-9]*); hard error
+#
+# Exit codes are distinct so the parser/emitter can react differently
+# (skip-with-warn vs abort) without re-validating.
+_validate_stage_name() {
+  local _stage="$1"
+  # Order matters: collision / reserved checks fire BEFORE format check
+  # so a name that matches both a reserved pattern AND has a format
+  # quirk (e.g. `v1.2` — dotted, but still in v[0-9]* reserved
+  # namespace) gets the more severe verdict (hard error 3) instead of
+  # the milder format-only verdict (skip 1). Same name should not
+  # silently drop as "invalid format" if its real problem is namespace
+  # collision.
+
+  # 1. baseline collision (template-managed stages)
+  #    Forward-looking: sys / devel-base / devel / devel-test / runtime-test
+  #    Legacy (backward-compat during v0.21.x transition): base / test
+  case "${_stage}" in
+    sys|devel-base|devel|devel-test|runtime-test) return 2 ;;
+    base|test) return 2 ;;
+  esac
+  # 2. reserved tag namespace (template-controlled tag slots)
+  case "${_stage}" in
+    latest)   return 3 ;;
+    v[0-9]*)  return 3 ;;
+  esac
+  # 3. format check (lowercase, leading letter, [a-z0-9_-])
+  [[ "${_stage}" =~ ^[a-z][a-z0-9_-]*$ ]] || return 1
+  return 0
+}
+
+# _parse_dockerfile_stages <dockerfile_path>
+#
+# Reads `^FROM <base> AS <stage>` lines from the Dockerfile, dedups,
+# filters out the baseline blocklist {sys, devel-base, devel,
+# devel-test, runtime-test} (plus the legacy {base, test} accepted
+# during the v0.21.x transition), and echoes the surviving stages
+# one per line preserving file order.
+#
+# Match rules:
+#   - Line must start with `FROM` (case-sensitive — Docker spec is
+#     case-insensitive but tooling convention is uppercase)
+#   - `AS` keyword must be uppercase (lowercase `as` is technically valid
+#     but treated as user typo / hand-edited and ignored)
+#   - Comments (#) on the line block the match — only bare directives count
+#   - Trailing whitespace tolerated
+#
+# Missing Dockerfile → empty output (silent), exit 0. Caller decides
+# whether to treat that as "no extra stages" or an error.
+_parse_dockerfile_stages() {
+  local _dockerfile="$1"
+  [[ -f "${_dockerfile}" ]] || return 0
+  # Read the Dockerfile directly (no grep|awk pipe) so an empty match
+  # set under `set -o pipefail` does not propagate exit 1 back through
+  # process substitution. BASH_REMATCH captures the stage name from
+  # the same regex shape grep used.
+  local _line _stage _seen=" "
+  while IFS= read -r _line; do
+    [[ "${_line}" =~ ^FROM[[:space:]]+[^[:space:]#]+[[:space:]]+AS[[:space:]]+([^[:space:]#]+)[[:space:]]*$ ]] || continue
+    _stage="${BASH_REMATCH[1]}"
+    case "${_stage}" in
+      sys|devel-base|devel|devel-test|runtime-test) continue ;;
+      base|test) continue ;;
+    esac
+    case "${_seen}" in
+      *" ${_stage} "*) continue ;;  # already emitted (dedup)
+    esac
+    _seen+="${_stage} "
+    printf '%s\n' "${_stage}"
+  done < "${_dockerfile}"
+  return 0
+}
+
+# _compute_dockerfile_hash <base_path> <outvar>
+#
+# sha256 of the Dockerfile's stage-list projection (just `FROM ... AS
+# <stage>` lines), NOT the whole Dockerfile. Drift detection scope:
+# adding/removing a stage changes which compose services exist, so the
+# hash must change on those edits — but unrelated `RUN apt-get install`
+# changes must not, otherwise every Dockerfile edit triggers a full
+# compose regen.
+#
+# Empty output if Dockerfile is missing (caller decides what to do).
+_compute_dockerfile_hash() {
+  local _base="${1:?}"
+  local -n _cdh_out="${2:?}"
+  local _dockerfile="${_base}/Dockerfile"
+  if [[ ! -f "${_dockerfile}" ]]; then
+    _cdh_out=""
+    return 0
+  fi
+  # Build the stage-list projection inline (no grep|sha256sum pipe) so
+  # an empty match set under pipefail does not propagate failure. The
+  # regex matches grep's exact shape used by _parse_dockerfile_stages.
+  local _line _stage_lines=""
+  while IFS= read -r _line; do
+    [[ "${_line}" =~ ^FROM[[:space:]]+[^[:space:]#]+[[:space:]]+AS[[:space:]]+[^[:space:]#]+[[:space:]]*$ ]] || continue
+    _stage_lines+="${_line}"$'\n'
+  done < "${_dockerfile}"
+  _cdh_out="$(printf '%s' "${_stage_lines}" | sha256sum | cut -d' ' -f1)"
+  return 0
+}
+
+# ════════════════════════════════════════════════════════════════════
+# Per-stage overrides (#220)
+#
+# `[stage:<name>]` sections in <repo>/setup.conf override top-level
+# settings on a per-stage basis. Only the v1 allowlist (gui.mode, the
+# whole [deploy] / [network] blocks, security.privileged, [volumes]
+# mounts, [environment] env_*) is honored — anything else is WARN'd
+# and skipped by the validator.
+#
+# List fields use append-default + opt-out semantics: stage's `mount_*`
+# / `port_*` / `env_*` items are appended to the top-level list unless
+# the matching `<list>_inherit = false` flag is set, in which case
+# only the stage's own entries survive.
+# ════════════════════════════════════════════════════════════════════
+
+# _parse_stage_sections <file> <out_array_var>
+#
+# Scans <file> for `^\[stage:NAME\]$` headers, returns NAME list in
+# file order. Stage names matching `[a-z][a-z0-9_-]*` are collected;
+# malformed names are silently skipped here (caller surfaces them
+# via _validate_stage_name). Empty / missing file → empty output.
+_parse_stage_sections() {
+  local _file="${1:?"${FUNCNAME[0]}: missing file"}"
+  local -n _pss_out="${2:?"${FUNCNAME[0]}: missing out array"}"
+  _pss_out=()
+  [[ -f "${_file}" ]] || return 0
+  local _line
+  while IFS= read -r _line || [[ -n "${_line}" ]]; do
+    if [[ "${_line}" =~ ^\[stage:([a-z][a-z0-9_-]*)\][[:space:]]*$ ]]; then
+      _pss_out+=("${BASH_REMATCH[1]}")
+    fi
+  done < "${_file}"
+}
+
+# _load_stage_overrides <base_path> <stage> <keys_outvar> <values_outvar>
+#
+# Reads the `[stage:<stage>]` section from <base_path>/setup.conf into
+# parallel arrays. Stage sections only live in the per-repo file
+# (template's setup.conf doesn't carry stage overrides — it doesn't
+# know which Dockerfile stages exist downstream). Honors SETUP_CONF
+# the same way _load_setup_conf does.
+_load_stage_overrides() {
+  local _base="${1:?"${FUNCNAME[0]}: missing base_path"}"
+  local _stage="${2:?"${FUNCNAME[0]}: missing stage"}"
+  local -n _lso_keys="${3:?"${FUNCNAME[0]}: missing keys outvar"}"
+  local -n _lso_values="${4:?"${FUNCNAME[0]}: missing values outvar"}"
+  _lso_keys=()
+  _lso_values=()
+
+  local _conf
+  if [[ -n "${SETUP_CONF:-}" ]]; then
+    _conf="${SETUP_CONF}"
+  else
+    _conf="${_base}/config/docker/setup.conf"
+  fi
+  [[ -f "${_conf}" ]] || return 0
+  _parse_ini_section "${_conf}" "stage:${_stage}" _lso_keys _lso_values
+}
+
+# _validate_stage_override_key <key>
+#
+# Returns 0 when <key> is in the v1 per-stage override allowlist,
+# 1 otherwise. Allowlist scope:
+#
+#   [deploy]      gpu_mode, gpu_count, gpu_capabilities, runtime
+#   [gui]         mode
+#   [network]     mode, ipc, network_name, port_<N>, port_inherit
+#   [security]    privileged
+#   [volumes]     mount_<N>, mount_inherit
+#   [environment] env_<N>, env_inherit
+#
+# Excluded by design (v1):
+#   [image_name] / [build] / security.cap_*/security_opt_* / [devices] /
+#   [tmpfs] / [additional_contexts] / [resources] — outside the
+#   "Isaac Sim per-stage runtime" use case driving #220. Re-evaluate in
+#   v2 once a real downstream need surfaces.
+_validate_stage_override_key() {
+  local _key="${1:?"${FUNCNAME[0]}: missing key"}"
+  case "${_key}" in
+    deploy.gpu_mode|deploy.gpu_count|deploy.gpu_capabilities|deploy.runtime) return 0 ;;
+    gui.mode) return 0 ;;
+    network.mode|network.ipc|network.network_name) return 0 ;;
+    security.privileged) return 0 ;;
+    network.port_inherit|volumes.mount_inherit|environment.env_inherit) return 0 ;;
+  esac
+  if [[ "${_key}" =~ ^(network\.port|volumes\.mount|environment\.env)_[0-9]+$ ]]; then
+    return 0
+  fi
+  return 1
+}
+
+# _resolve_stage_scalar <keys_var> <values_var> <key> <fallback> <out_var>
+#
+# Look up <key> in the stage's parallel arrays. If found, set <out_var>
+# to that value; otherwise set <out_var> to <fallback>. Used for
+# per-stage scalar overrides (gui.mode, network.mode, etc.) where there
+# is no merge — the stage value either replaces the top-level or
+# falls through entirely.
+_resolve_stage_scalar() {
+  local -n _rss_keys="${1:?"${FUNCNAME[0]}: missing keys array"}"
+  local -n _rss_values="${2:?"${FUNCNAME[0]}: missing values array"}"
+  local _key="${3:?"${FUNCNAME[0]}: missing key"}"
+  local _fallback="${4-}"
+  local -n _rss_out="${5:?"${FUNCNAME[0]}: missing out var"}"
+  local i
+  for (( i = 0; i < ${#_rss_keys[@]}; i++ )); do
+    if [[ "${_rss_keys[i]}" == "${_key}" ]]; then
+      _rss_out="${_rss_values[i]}"
+      return 0
+    fi
+  done
+  _rss_out="${_fallback}"
+}
+
+# _resolve_stage_list <keys_var> <values_var> <prefix> <inherit_key> \
+#                     <top_level_str> <out_var>
+#
+# Computes the effective list for a list field (volumes.mount_*,
+# network.port_*, environment.env_*) on a per-stage basis.
+#
+# Args:
+#   keys_var / values_var  Stage's parallel override arrays
+#   prefix                 Full dotted prefix e.g. "volumes.mount_"
+#                          — keys matching `<prefix>[0-9]+` are list items
+#   inherit_key            Meta-key e.g. "volumes.mount_inherit"
+#                          — value "false" switches to replace mode
+#   top_level_str          Newline-separated top-level list (the same
+#                          aggregate format setup.sh uses elsewhere)
+#   out_var                Newline-separated effective list (no
+#                          trailing newline)
+#
+# Default (inherit unspecified or anything ≠ "false"): top-level entries
+# come first, stage entries appended afterward in setup.conf order.
+# Replace mode (inherit=false): only stage entries appear; top-level
+# is dropped. The opt-out lets a stage opt out of inherited mounts
+# entirely (e.g. headless that wants no host-side ssh keys, regardless
+# of the top-level mount_2 setting).
+_resolve_stage_list() {
+  local -n _rsl_keys="${1:?"${FUNCNAME[0]}: missing keys array"}"
+  local -n _rsl_values="${2:?"${FUNCNAME[0]}: missing values array"}"
+  local _prefix="${3:?"${FUNCNAME[0]}: missing prefix"}"
+  local _inherit_key="${4:?"${FUNCNAME[0]}: missing inherit_key"}"
+  local _top="${5-}"
+  local -n _rsl_out="${6:?"${FUNCNAME[0]}: missing out var"}"
+
+  # Default to inheriting top-level. Only the literal "false" toggles
+  # replace mode — anything else (including "true", empty, malformed)
+  # keeps the safe append-default behavior.
+  local _inherit="true" i
+  for (( i = 0; i < ${#_rsl_keys[@]}; i++ )); do
+    if [[ "${_rsl_keys[i]}" == "${_inherit_key}" ]]; then
+      [[ "${_rsl_values[i]}" == "false" ]] && _inherit="false"
+      break
+    fi
+  done
+
+  # Collect stage's own list entries in setup.conf order. Match only
+  # `<prefix><digits>` so meta-keys like `mount_inherit` (which share
+  # the prefix) are not pulled in.
+  local -a _stage_entries=()
+  local _suffix
+  for (( i = 0; i < ${#_rsl_keys[@]}; i++ )); do
+    [[ "${_rsl_keys[i]}" == "${_prefix}"* ]] || continue
+    _suffix="${_rsl_keys[i]#"${_prefix}"}"
+    [[ "${_suffix}" =~ ^[0-9]+$ ]] || continue
+    _stage_entries+=("${_rsl_values[i]}")
+  done
+
+  if [[ "${_inherit}" == "true" ]]; then
+    if [[ -n "${_top}" ]] && (( ${#_stage_entries[@]} > 0 )); then
+      _rsl_out="${_top}"$'\n'"$(printf '%s\n' "${_stage_entries[@]}")"
+      _rsl_out="${_rsl_out%$'\n'}"
+    elif [[ -n "${_top}" ]]; then
+      _rsl_out="${_top}"
+    elif (( ${#_stage_entries[@]} > 0 )); then
+      _rsl_out="$(printf '%s\n' "${_stage_entries[@]}")"
+      _rsl_out="${_rsl_out%$'\n'}"
+    else
+      _rsl_out=""
+    fi
+  else
+    if (( ${#_stage_entries[@]} > 0 )); then
+      _rsl_out="$(printf '%s\n' "${_stage_entries[@]}")"
+      _rsl_out="${_rsl_out%$'\n'}"
+    else
+      _rsl_out=""
+    fi
+  fi
+}
+
+# _parse_logging_svc_sections <file> <out_array>
+#
+# Emit each service name that has a `[logging.<svc>]` section in <file>
+# (in the order they appear). Mirrors `_parse_stage_sections` but for
+# the per-service logging override namespace (#310).
+_parse_logging_svc_sections() {
+  local _file="${1:?"${FUNCNAME[0]}: missing file"}"
+  local -n _plss_out="${2:?"${FUNCNAME[0]}: missing out array"}"
+  _plss_out=()
+  [[ -f "${_file}" ]] || return 0
+  local _line
+  while IFS= read -r _line || [[ -n "${_line}" ]]; do
+    if [[ "${_line}" =~ ^\[logging\.([a-z][a-z0-9_-]*)\][[:space:]]*$ ]]; then
+      _plss_out+=("${BASH_REMATCH[1]}")
+    fi
+  done < "${_file}"
+}
+
+# _collect_logging <base_path> <global_out> <per_svc_out>
+#
+# Resolve [logging] + [logging.<svc>] for the compose generator. Output
+# layout:
+#
+#   global_out   newline-separated KEY=VALUE for the effective global
+#                [logging] section. Resolution rule mirrors [security]
+#                (line 3328 area): if the per-repo setup.conf has a
+#                [logging] section, that section fully replaces the
+#                template default (per CLAUDE.md "section-level
+#                replace, no key-level merge inside a section"). If
+#                the per-repo file omits the section, template
+#                defaults apply.
+#
+#   per_svc_out  newline-separated "<svc>:KEY=VALUE" rows for any
+#                [logging.<svc>] sections in the per-repo setup.conf.
+#                Key-level merge against global_out happens in
+#                `_emit_logging_block` at compose-emit time — only
+#                keys present in [logging.<svc>] override the
+#                corresponding global key; absent keys fall through.
+#                Template setup.conf does not ship per-svc sections;
+#                if one ever appears there it is honored too (parsed
+#                only from the per-repo file in practice, since the
+#                template loader path uses _SETUP_SCRIPT_DIR).
+_collect_logging() {
+  local _base="${1:?"${FUNCNAME[0]}: missing base_path"}"
+  local -n _cl_global="${2:?"${FUNCNAME[0]}: missing global outvar"}"
+  local -n _cl_per_svc="${3:?"${FUNCNAME[0]}: missing per_svc outvar"}"
+  _cl_global=""
+  _cl_per_svc=""
+
+  local _conf
+  if [[ -n "${SETUP_CONF:-}" ]]; then
+    _conf="${SETUP_CONF}"
+  else
+    _conf="${_base}/config/docker/setup.conf"
+  fi
+
+  # Global [logging] — per-repo first, fall back to template if absent.
+  local -a _g_keys=() _g_vals=()
+  [[ -f "${_conf}" ]] && _parse_ini_section "${_conf}" "logging" _g_keys _g_vals
+  if (( ${#_g_keys[@]} == 0 )); then
+    local _tpl="${_SETUP_SCRIPT_DIR}/../../config/docker/setup.conf"
+    [[ -f "${_tpl}" ]] && _parse_ini_section "${_tpl}" "logging" _g_keys _g_vals
+  fi
+  local i
+  local -a _g_lines=()
+  for (( i = 0; i < ${#_g_keys[@]}; i++ )); do
+    _g_lines+=("${_g_keys[i]}=${_g_vals[i]}")
+  done
+  (( ${#_g_lines[@]} > 0 )) && _cl_global="$(printf '%s\n' "${_g_lines[@]}")"
+
+  # Per-service [logging.<svc>] sections (per-repo only).
+  [[ -f "${_conf}" ]] || return 0
+  local -a _svcs=()
+  _parse_logging_svc_sections "${_conf}" _svcs
+  local _svc
+  local -a _ps_lines=()
+  for _svc in "${_svcs[@]}"; do
+    local -a _sk=() _sv=()
+    _parse_ini_section "${_conf}" "logging.${_svc}" _sk _sv
+    for (( i = 0; i < ${#_sk[@]}; i++ )); do
+      _ps_lines+=("${_svc}:${_sk[i]}=${_sv[i]}")
+    done
+  done
+  (( ${#_ps_lines[@]} > 0 )) && _cl_per_svc="$(printf '%s\n' "${_ps_lines[@]}")"
+  return 0
+}
+
+# ════════════════════════════════════════════════════════════════════
 # generate_compose_yaml <out> <repo_name> <gui_enabled> <gpu_enabled>
 #                       <gpu_count> <gpu_caps> <extras_array_ref>
 #                       [<network_name>]
@@ -832,6 +1284,48 @@ _compute_conf_hash() {
 #     `network_mode: ${NETWORK_MODE}`.
 # IPC/privileged always read from env var refs; .env provides values.
 # ════════════════════════════════════════════════════════════════════
+
+# _expand_env_cross_refs <input-newline-list> <output-array-name>
+#
+# Reads `KEY=VALUE` entries (one per line, blank lines skipped) and
+# substitutes `${KEY}` references in each value with the value of an
+# earlier-seen sibling KEY. Order-sensitive: forward references (a value
+# referencing a sibling not yet parsed) survive as the literal `${VAR}`,
+# as do unknown references with no matching sibling -- compose.yaml's
+# own substitution layer (.env / shell env) gets a chance at file-load
+# time, surfacing genuinely undefined names visibly rather than silently
+# substituting empty.
+#
+# Resolves issue #236: previously, sibling cross-references in
+# `[environment] env_N` were emitted literally and compose's `${VAR}`
+# substitution does NOT consult sibling environment entries -- so e.g.
+#   env_1 = BUILD_TARGET=production
+#   env_2 = LD_LIBRARY_PATH=/foo/${BUILD_TARGET}/lib
+# would ship `LD_LIBRARY_PATH=/foo//lib` to the container.
+_expand_env_cross_refs() {
+  local _input="$1"
+  local -n _expand_out_arr="$2"
+  _expand_out_arr=()
+  declare -A _seen=()
+  local _line _k _v _ref_k _ref_v _expanded
+  while IFS= read -r _line; do
+    [[ -z "${_line}" ]] && continue
+    _k="${_line%%=*}"
+    _v="${_line#*=}"
+    _expanded="${_v}"
+    # Substitute every ${ref_k} found in _v against earlier siblings.
+    # Multiple-pass not needed because _seen already holds fully-expanded
+    # values from prior iterations (transitive references resolve through
+    # the chain naturally).
+    for _ref_k in "${!_seen[@]}"; do
+      _ref_v="${_seen[${_ref_k}]}"
+      _expanded="${_expanded//\$\{${_ref_k}\}/${_ref_v}}"
+    done
+    _seen["${_k}"]="${_expanded}"
+    _expand_out_arr+=("${_k}=${_expanded}")
+  done <<< "${_input}"
+}
+
 generate_compose_yaml() {
   local _out="${1:?}"
   local _name="${2:?}"
@@ -857,6 +1351,69 @@ generate_compose_yaml() {
   local _build_network="${22:-}"
   local _runtime="${23:-}"
   local _additional_contexts_str="${24:-}"
+  local _logging_global_str="${25:-}"
+  local _logging_per_svc_str="${26:-}"
+
+  # _logging_svc_kv <svc> <out_assoc_name>
+  #
+  # Resolve effective logging KV map for compose service <svc>:
+  #   1. seed with global [logging] entries (`_logging_global_str`)
+  #   2. overlay per-service [logging.<svc>] entries — key-level merge
+  #
+  # If both inputs are empty the map stays empty and the emitter
+  # downstream skips the `logging:` block entirely (back-compat with
+  # downstream repos that haven't adopted [logging] yet).
+  _logging_svc_kv() {
+    local _svc="$1"
+    local -n _lkv="$2"
+    _lkv=()
+    local _line _k _v
+    if [[ -n "${_logging_global_str}" ]]; then
+      while IFS= read -r _line; do
+        [[ -z "${_line}" ]] && continue
+        _k="${_line%%=*}"
+        _v="${_line#*=}"
+        _lkv["${_k}"]="${_v}"
+      done <<< "${_logging_global_str}"
+    fi
+    if [[ -n "${_logging_per_svc_str}" ]]; then
+      while IFS= read -r _line; do
+        [[ -z "${_line}" ]] && continue
+        [[ "${_line%%:*}" == "${_svc}" ]] || continue
+        _line="${_line#*:}"
+        _k="${_line%%=*}"
+        _v="${_line#*=}"
+        _lkv["${_k}"]="${_v}"
+      done <<< "${_logging_per_svc_str}"
+    fi
+  }
+
+  # _emit_logging_block <svc>
+  #
+  # Emit compose `logging:` mapping for service <svc>. Maps the four
+  # setup.conf keys (driver / max_size / max_file / compress) to the
+  # corresponding Docker compose option names (driver as scalar;
+  # max-size / max-file / compress as `options:` sub-keys, dash-named
+  # per Docker docs). No-op when the effective KV map is empty.
+  _emit_logging_block() {
+    local _svc="$1"
+    local -A _kv=()
+    _logging_svc_kv "${_svc}" _kv
+    (( ${#_kv[@]} == 0 )) && return 0
+    echo "    logging:"
+    [[ -n "${_kv[driver]:-}" ]] && echo "      driver: ${_kv[driver]}"
+    local _have_opts=0 _k
+    for _k in max_size max_file compress; do
+      [[ -n "${_kv[${_k}]:-}" ]] && _have_opts=1 && break
+    done
+    if (( _have_opts )); then
+      echo "      options:"
+      [[ -n "${_kv[max_size]:-}" ]] && echo "        max-size: \"${_kv[max_size]}\""
+      [[ -n "${_kv[max_file]:-}" ]] && echo "        max-file: \"${_kv[max_file]}\""
+      [[ -n "${_kv[compress]:-}" ]] && echo "        compress: \"${_kv[compress]}\""
+    fi
+    return 0
+  }
 
   # additional_contexts emitter: forwards `[additional_contexts]
   # context_N = NAME=PATH` entries to compose.yaml's
@@ -897,26 +1454,82 @@ generate_compose_yaml() {
   # need `runtime: nvidia` at service level to bypass the modern
   # --gpus flow (which `deploy.resources.reservations.devices`
   # translates to). Empty = omit so Docker uses the default runc.
-  # Only emitted for the devel service; test doesn't run.
+  # Only emitted for the devel service; devel-test doesn't run.
   _emit_runtime_line() {
     [[ -z "${_runtime}" ]] && return 0
     printf '    runtime: %s\n' "${_runtime}"
   }
 
-  # Detect `FROM … AS runtime` in the sibling Dockerfile — if present,
-  # emit a dedicated `runtime` compose service that extends `devel`'s
-  # baseline (same volumes / network / caps / GPU) but with its own
-  # image tag, container_name, and non-interactive tty settings so
-  # `./run.sh -t runtime` auto-runs the Dockerfile CMD (e.g. a
-  # parameter_bridge process). Absent `AS runtime` → skip emission so
-  # repos without a runtime stage don't get a broken service entry.
-  # Issue #108.
-  local _dockerfile _has_runtime=false
-  _dockerfile="$(dirname -- "${_out}")/Dockerfile"
-  if [[ -f "${_dockerfile}" ]] \
-     && grep -qE '^FROM[[:space:]]+[^[:space:]]+[[:space:]]+AS[[:space:]]+runtime[[:space:]]*$' "${_dockerfile}"; then
-    _has_runtime=true
-  fi
+  # Auto-emit any `FROM <base> AS <stage>` outside the baseline
+  # blocklist {sys, base, devel, test} as a compose service that
+  # `extends: devel` and only overrides target / image / container_name /
+  # stdin_open / tty / profiles. Issue #215 generalized the v0.10.0
+  # `runtime`-only detection (#108) so any user-added stage gets a
+  # corresponding service automatically — e.g. NVIDIA Isaac Sim's
+  # `headless` + `gui` stages share devel's baseline (GPU / network /
+  # volumes) and differ only in ENTRYPOINT.
+  #
+  # Validation: each parsed stage runs through _validate_stage_name.
+  # Returns 1 (invalid format) → WARN + skip but keep parsing.
+  # Returns 2 (baseline collision) / 3 (reserved tag namespace) →
+  # caller exits non-zero so user fixes the Dockerfile before retry.
+  # Per-stage diff (different volumes / GPU / network than devel) is
+  # out of scope v1; declare via Dockerfile ARG + conditional RUN.
+  local _dockerfile _setup_base
+  _setup_base="$(dirname -- "${_out}")"
+  _dockerfile="${_setup_base}/Dockerfile"
+  local -a _emit_stages=()
+  local _stage _vrc
+  while IFS= read -r _stage; do
+    [[ -z "${_stage}" ]] && continue
+    _vrc=0
+    _validate_stage_name "${_stage}" || _vrc=$?
+    case "${_vrc}" in
+      0) _emit_stages+=("${_stage}") ;;
+      1) _log_warn setup "$(_setup_msg stage invalid_format): $(printf '%q' "${_stage}")" ;;
+      2) _log_err setup "$(_setup_msg stage baseline_collision): $(printf '%q' "${_stage}")"; return 1 ;;
+      3) _log_err setup "$(_setup_msg stage reserved_tag): $(printf '%q' "${_stage}")"; return 1 ;;
+    esac
+  done < <(_parse_dockerfile_stages "${_dockerfile}")
+
+  # Per-stage overrides (#220) — validate setup.conf [stage:*] sections.
+  #
+  #   sys / base / test       → hard error (baseline collision)
+  #   latest / v[0-9]*        → hard error (reserved tag namespace)
+  #   devel                   → reserved (v1 no-op WARN)
+  #   foo (not in Dockerfile) → orphan WARN, ignored
+  #
+  # Stages with malformed names that don't match `[a-z][a-z0-9_-]*`
+  # never reach _conf_stages because _parse_stage_sections's regex
+  # already filters them; that's an acceptable v1 silent-drop since
+  # the TUI is the primary write path and validates names upfront.
+  local -a _conf_stages=()
+  _parse_stage_sections "${_setup_base}/config/docker/setup.conf" _conf_stages
+  local _cs
+  for _cs in "${_conf_stages[@]}"; do
+    case "${_cs}" in
+      sys|base|test)
+        _log_err setup "$(_setup_msg stage baseline_collision): [stage:${_cs}]"
+        return 1
+        ;;
+      latest|v[0-9]*)
+        _log_err setup "$(_setup_msg stage reserved_tag): [stage:${_cs}]"
+        return 1
+        ;;
+      devel)
+        _log_warn setup "[stage:devel] is reserved; not applied in v1 (#220). Edit top-level sections to tune devel."
+        continue
+        ;;
+    esac
+    # Orphan check: stage is referenced but Dockerfile doesn't have it.
+    local _is_emitted=0 _es
+    for _es in "${_emit_stages[@]}"; do
+      [[ "${_es}" == "${_cs}" ]] && _is_emitted=1 && break
+    done
+    if (( ! _is_emitted )); then
+      _log_warn setup "$(_setup_msg stage unknown_referenced): [stage:${_cs}]"
+    fi
+  done
 
   # Convert space-separated caps to YAML array form [a, b, c]
   local -a _caps_arr=()
@@ -1029,11 +1642,17 @@ YAML
 YAML
       fi
       if [[ -n "${_env_str}" ]]; then
+        # Expand `${KEY}` cross-references against earlier siblings so
+        # the emitted compose.yaml carries the user's intent verbatim
+        # (compose's own substitution layer does NOT see sibling env
+        # entries -- refs #236).
+        local -a _env_expanded=()
+        _expand_env_cross_refs "${_env_str}" _env_expanded
         local _ev
-        while IFS= read -r _ev; do
+        for _ev in "${_env_expanded[@]}"; do
           [[ -z "${_ev}" ]] && continue
           echo "      - ${_ev}"
-        done <<< "${_env_str}"
+        done
       fi
     fi
     # ports: only emitted when network_mode=bridge (ignored under host)
@@ -1104,35 +1723,339 @@ YAML
               capabilities: ${_caps_yaml}
 YAML
     fi
+    _emit_logging_block devel
 
-    # runtime service (when Dockerfile has `AS runtime`): extends devel's
-    # baseline (volumes, network, GPU, capabilities), overrides target +
-    # image + container_name, disables tty/stdin_open since runtime is
-    # auto-run headless (Dockerfile CMD drives). profiles: [runtime]
-    # keeps plain `compose up` scoped to devel; `compose run runtime` or
-    # `compose up runtime` still works because explicit-service targeting
-    # bypasses the profile gate.
-    if [[ "${_has_runtime}" == true ]]; then
-      cat <<YAML
+    # Auto-emit a service per non-baseline stage parsed from the
+    # Dockerfile (#215). Each service:
+    #   - extends `devel` (compose merges network / ipc / privileged /
+    #     cap_add / volumes / environment / deploy.resources / runtime)
+    #   - overrides build.target so docker builds the right stage
+    #   - tags `image:` and `container_name:` per stage so multiple
+    #     stages coexist locally without clobbering devel's `:devel`
+    #   - disables stdin_open / tty: stages are typically headless
+    #     entrypoints (e.g. `headless` runs runheadless.sh, `runtime`
+    #     runs CMD-driven daemons). Interactive debug uses
+    #     `./exec.sh -t <stage>` after `./run.sh -t <stage>`.
+    #   - profiles: [<stage>] keeps plain `docker compose up` scoped to
+    #     devel; explicit `compose up <stage>` or `./run.sh -t <stage>`
+    #     bypasses the profile gate.
+    #
+    # `runtime` is no longer special-cased (#108) — it falls through
+    # this loop like any other non-baseline stage, preserving its
+    # behavior since `runtime` is not in the baseline blocklist.
+    # Build a snapshot of the top-level volumes list (newline-separated
+    # — same shape `_resolve_stage_list` consumes/produces). The list is
+    # what feeds into compose.yaml's volumes block before per-stage
+    # append/replace logic kicks in. _gcy_extras already excludes the
+    # GUI baseline (X11) — those are emitted separately based on
+    # effective gui resolution.
+    local _top_volumes_str=""
+    if (( ${#_gcy_extras[@]} > 0 )); then
+      _top_volumes_str="$(printf '%s\n' "${_gcy_extras[@]}")"
+      _top_volumes_str="${_top_volumes_str%$'\n'}"
+    fi
 
-  runtime:
+    local _emit_stage
+    for _emit_stage in "${_emit_stages[@]}"; do
+      # Load + filter [stage:<name>] overrides for this stage.
+      local -a _so_keys=() _so_values=()
+      _load_stage_overrides "${_setup_base}" "${_emit_stage}" _so_keys _so_values
+      local -a _so_filtered_keys=() _so_filtered_values=()
+      local _ki
+      for (( _ki = 0; _ki < ${#_so_keys[@]}; _ki++ )); do
+        if _validate_stage_override_key "${_so_keys[_ki]}"; then
+          _so_filtered_keys+=("${_so_keys[_ki]}")
+          _so_filtered_values+=("${_so_values[_ki]}")
+        else
+          _log_warn setup "$(_setup_msg stage override_key_not_allowed): $(printf '%q' "${_so_keys[_ki]}") (stage=${_emit_stage})"
+        fi
+      done
+      local _has_overrides=0
+      (( ${#_so_filtered_keys[@]} > 0 )) && _has_overrides=1
+
+      # Zero-diff path: stage with NO overrides keeps the minimal
+      # extends:devel shape from #215. Critical for the 17 existing
+      # downstream repos (no [stage:*] sections → byte-for-byte
+      # identical compose.yaml output to pre-#220).
+      if (( ! _has_overrides )); then
+        cat <<YAML
+
+  ${_emit_stage}:
     extends:
       service: devel
     build:
       context: .
       dockerfile: Dockerfile
-      target: runtime
+      target: ${_emit_stage}
 YAML
-      _emit_additional_contexts_block
-      cat <<YAML
-    image: \${DOCKER_HUB_USER:-local}/${_name}:runtime
-    container_name: ${_name}-runtime\${INSTANCE_SUFFIX:-}
+        _emit_additional_contexts_block
+        cat <<YAML
+    image: \${DOCKER_HUB_USER:-local}/${_name}:${_emit_stage}
+    container_name: ${_name}-${_emit_stage}\${INSTANCE_SUFFIX:-}
     stdin_open: false
     tty: false
     profiles:
-      - runtime
+      - ${_emit_stage}
 YAML
-    fi
+        # Per-stage [logging.<stage>] override (if any). Without an
+        # override compose `extends: devel` already covers logging:
+        # compose extends merges mapping sub-keys so devel's logging
+        # block carries over — emit only when the stage actually
+        # diverges from devel.
+        if [[ -n "${_logging_per_svc_str}" ]] && \
+           grep -qE "^${_emit_stage}:" <<< "${_logging_per_svc_str}"; then
+          _emit_logging_block "${_emit_stage}"
+        fi
+        continue
+      fi
+
+      # Resolve effective per-stage values. For modes (gui / gpu),
+      # absent or "auto" inherits the parent's already-resolved boolean
+      # — we don't re-detect inside the stage. For other scalars, the
+      # parent's effective value is the fallback.
+      local _eff_gui_mode _eff_gui
+      _resolve_stage_scalar _so_filtered_keys _so_filtered_values "gui.mode" "" _eff_gui_mode
+      case "${_eff_gui_mode}" in
+        off)   _eff_gui="false" ;;
+        force) _eff_gui="true" ;;
+        *)     _eff_gui="${_gui}" ;;
+      esac
+
+      local _eff_gpu_mode _eff_gpu
+      _resolve_stage_scalar _so_filtered_keys _so_filtered_values "deploy.gpu_mode" "" _eff_gpu_mode
+      case "${_eff_gpu_mode}" in
+        off)   _eff_gpu="false" ;;
+        force) _eff_gpu="true" ;;
+        *)     _eff_gpu="${_gpu}" ;;
+      esac
+
+      local _eff_gpu_count _eff_gpu_caps _eff_runtime
+      _resolve_stage_scalar _so_filtered_keys _so_filtered_values "deploy.gpu_count" "${_gpu_count}" _eff_gpu_count
+      _resolve_stage_scalar _so_filtered_keys _so_filtered_values "deploy.gpu_capabilities" "${_gpu_caps}" _eff_gpu_caps
+      _resolve_stage_scalar _so_filtered_keys _so_filtered_values "deploy.runtime" "${_runtime}" _eff_runtime
+
+      local _eff_net_mode _eff_ipc_mode _eff_net_name _eff_privileged
+      _resolve_stage_scalar _so_filtered_keys _so_filtered_values "network.mode" "${_net_mode}" _eff_net_mode
+      _resolve_stage_scalar _so_filtered_keys _so_filtered_values "network.ipc" "${_ipc_mode}" _eff_ipc_mode
+      _resolve_stage_scalar _so_filtered_keys _so_filtered_values "network.network_name" "${_net_name}" _eff_net_name
+      _resolve_stage_scalar _so_filtered_keys _so_filtered_values "security.privileged" "" _eff_privileged
+
+      local _eff_volumes _eff_environment _eff_ports
+      _resolve_stage_list _so_filtered_keys _so_filtered_values "volumes.mount_" "volumes.mount_inherit" "${_top_volumes_str}" _eff_volumes
+      _resolve_stage_list _so_filtered_keys _so_filtered_values "environment.env_" "environment.env_inherit" "${_env_str}" _eff_environment
+      _resolve_stage_list _so_filtered_keys _so_filtered_values "network.port_" "network.port_inherit" "${_ports_str}" _eff_ports
+
+      # ── Standalone emit (#220 v0.18.1 fix) ──────────────────────────
+      #
+      # Stages with overrides drop `extends: devel` and emit a full
+      # service block. Reason: compose `extends` MERGES list fields
+      # (volumes / environment / ports / cap_add / deploy.devices) by
+      # appending child entries to parent's, not replacing them. So a
+      # stage that wants `gui.mode = off` cannot suppress devel's X11
+      # mount / DISPLAY env via extends — they merge back in. The Isaac
+      # Sim headless validation (#220 comment 2026-05-06) confirmed
+      # this. Standalone emit sidesteps the merge entirely: every list
+      # the stage touches contains exactly the resolved set of entries.
+      #
+      # Top-level fields not yet in the per-stage allowlist (`cap_add` /
+      # `cap_drop` / `security_opt` / `devices` / `cgroup_rules` /
+      # `tmpfs`) are re-emitted from the enclosing scope's top-level
+      # values so the stage still inherits those by default.
+      #
+      # Cost: a stage with even a single scalar override now produces
+      # ~150 lines of compose.yaml instead of ~10. compose.yaml is
+      # auto-generated, so the verbosity is fine; correctness wins.
+
+      cat <<YAML
+
+  ${_emit_stage}:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: ${_emit_stage}
+YAML
+      _emit_additional_contexts_block
+      _emit_build_network_line
+      cat <<YAML
+      args:
+        APT_MIRROR_UBUNTU: \${APT_MIRROR_UBUNTU:-archive.ubuntu.com}
+        APT_MIRROR_DEBIAN: \${APT_MIRROR_DEBIAN:-deb.debian.org}
+        TZ: \${TZ:-Asia/Taipei}
+        USER_NAME: \${USER_NAME}
+        USER_GROUP: \${USER_GROUP}
+        USER_UID: \${USER_UID}
+        USER_GID: \${USER_GID}
+YAML
+      _emit_target_arch_line
+      _emit_user_build_args
+      cat <<YAML
+    image: \${DOCKER_HUB_USER:-local}/${_name}:${_emit_stage}
+    container_name: ${_name}-${_emit_stage}\${INSTANCE_SUFFIX:-}
+    stdin_open: false
+    tty: false
+    profiles:
+      - ${_emit_stage}
+YAML
+      # privileged: literal when stage overrides; else env-var ref
+      # (same shape devel emits — .env's PRIVILEGED applies).
+      if [[ -n "${_eff_privileged}" ]]; then
+        echo "    privileged: ${_eff_privileged}"
+      else
+        echo "    privileged: \${PRIVILEGED}"
+      fi
+      # ipc: literal when stage overrides; else env-var ref.
+      if [[ "${_eff_ipc_mode}" != "${_ipc_mode}" ]]; then
+        echo "    ipc: ${_eff_ipc_mode}"
+      else
+        echo "    ipc: \${IPC_MODE}"
+      fi
+      # runtime: only when explicitly set non-empty / non-auto / non-off.
+      if [[ -n "${_eff_runtime}" ]] && \
+         [[ "${_eff_runtime}" != "off" ]] && \
+         [[ "${_eff_runtime}" != "auto" ]]; then
+        echo "    runtime: ${_eff_runtime}"
+      fi
+      # cap_add / cap_drop / security_opt — re-emit from top-level
+      # (not yet in per-stage allowlist; v2 may revisit).
+      if [[ -n "${_cap_add_str}" ]]; then
+        echo "    cap_add:"
+        local _sa_cap
+        while IFS= read -r _sa_cap; do
+          [[ -z "${_sa_cap}" ]] && continue
+          echo "      - ${_sa_cap}"
+        done <<< "${_cap_add_str}"
+      fi
+      if [[ -n "${_cap_drop_str}" ]]; then
+        echo "    cap_drop:"
+        local _sa_cd
+        while IFS= read -r _sa_cd; do
+          [[ -z "${_sa_cd}" ]] && continue
+          echo "      - ${_sa_cd}"
+        done <<< "${_cap_drop_str}"
+      fi
+      if [[ -n "${_sec_opt_str}" ]]; then
+        echo "    security_opt:"
+        local _sa_so
+        while IFS= read -r _sa_so; do
+          [[ -z "${_sa_so}" ]] && continue
+          echo "      - ${_sa_so}"
+        done <<< "${_sec_opt_str}"
+      fi
+      # network: literal mode + optional named network. When stage
+      # didn't override mode, fall back to env-var ref (matches devel).
+      if [[ "${_eff_net_mode}" == "bridge" ]] && [[ -n "${_eff_net_name}" ]]; then
+        cat <<YAML
+    networks:
+      - ${_eff_net_name}
+YAML
+      elif [[ "${_eff_net_mode}" != "${_net_mode}" ]]; then
+        echo "    network_mode: ${_eff_net_mode}"
+      else
+        echo "    network_mode: \${NETWORK_MODE}"
+      fi
+      # environment: GUI baseline (effective gui) + effective env list.
+      if [[ "${_eff_gui}" == "true" ]] || [[ -n "${_eff_environment}" ]]; then
+        echo "    environment:"
+        if [[ "${_eff_gui}" == "true" ]]; then
+          cat <<'YAML'
+      - DISPLAY=${DISPLAY:-}
+      - WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-}
+      - XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/1000}
+      - XAUTHORITY=${XAUTHORITY:-}
+YAML
+        fi
+        if [[ -n "${_eff_environment}" ]]; then
+          local _ev
+          while IFS= read -r _ev; do
+            [[ -z "${_ev}" ]] && continue
+            echo "      - ${_ev}"
+          done <<< "${_eff_environment}"
+        fi
+      fi
+      # ports: only under bridge mode (compose ignores it under host).
+      if [[ -n "${_eff_ports}" ]] && [[ "${_eff_net_mode}" == "bridge" ]]; then
+        echo "    ports:"
+        local _sp
+        while IFS= read -r _sp; do
+          [[ -z "${_sp}" ]] && continue
+          echo "      - \"${_sp}\""
+        done <<< "${_eff_ports}"
+      fi
+      # volumes: GUI baseline (effective gui) + effective volume list.
+      if [[ "${_eff_gui}" == "true" ]] || [[ -n "${_eff_volumes}" ]]; then
+        echo "    volumes:"
+        if [[ "${_eff_gui}" == "true" ]]; then
+          cat <<'YAML'
+      - /tmp/.X11-unix:/tmp/.X11-unix:ro
+      - ${XDG_RUNTIME_DIR:-/run/user/1000}:${XDG_RUNTIME_DIR:-/run/user/1000}:rw
+      - ${XAUTHORITY:-/dev/null}:${XAUTHORITY:-/dev/null}:ro
+YAML
+        fi
+        if [[ -n "${_eff_volumes}" ]]; then
+          local _m
+          while IFS= read -r _m; do
+            [[ -z "${_m}" ]] && continue
+            echo "      - ${_m}"
+          done <<< "${_eff_volumes}"
+        fi
+      fi
+      # devices: + cgroup_rules: from top-level (not yet per-stage).
+      if [[ -n "${_devices_str}" ]]; then
+        echo "    devices:"
+        local _sd
+        while IFS= read -r _sd; do
+          [[ -z "${_sd}" ]] && continue
+          echo "      - ${_sd}"
+        done <<< "${_devices_str}"
+      fi
+      if [[ -n "${_cgroup_rule_str}" ]]; then
+        echo "    device_cgroup_rules:"
+        local _scr
+        while IFS= read -r _scr; do
+          [[ -z "${_scr}" ]] && continue
+          echo "      - \"${_scr}\""
+        done <<< "${_cgroup_rule_str}"
+      fi
+      # tmpfs: from top-level.
+      if [[ -n "${_tmpfs_str}" ]]; then
+        echo "    tmpfs:"
+        local _stf
+        while IFS= read -r _stf; do
+          [[ -z "${_stf}" ]] && continue
+          echo "      - ${_stf}"
+        done <<< "${_tmpfs_str}"
+      fi
+      # shm_size: depends on effective ipc (only emitted under
+      # non-host ipc, mirroring devel).
+      if [[ -n "${_shm_size}" ]] && [[ "${_eff_ipc_mode}" != "host" ]]; then
+        echo "    shm_size: ${_shm_size}"
+      fi
+      # deploy / GPU block: emit when effective gpu is enabled.
+      if [[ "${_eff_gpu}" == "true" ]]; then
+        local -a _eff_caps_arr=()
+        read -ra _eff_caps_arr <<< "${_eff_gpu_caps}"
+        local _eff_caps_yaml="["
+        local _ef=1 _ec
+        for _ec in "${_eff_caps_arr[@]}"; do
+          if (( _ef )); then _eff_caps_yaml+="${_ec}"; _ef=0
+          else _eff_caps_yaml+=", ${_ec}"; fi
+        done
+        _eff_caps_yaml+="]"
+        cat <<YAML
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: ${_eff_gpu_count}
+              capabilities: ${_eff_caps_yaml}
+YAML
+      fi
+      # Stage emits a standalone block (no `extends: devel`), so it
+      # carries no inherited logging — always emit the effective
+      # logging block when [logging] or [logging.<stage>] is set.
+      _emit_logging_block "${_emit_stage}"
+    done
 
     cat <<YAML
 
@@ -1140,7 +2063,7 @@ YAML
     build:
       context: .
       dockerfile: Dockerfile
-      target: test
+      target: devel-test
 YAML
     _emit_additional_contexts_block
     _emit_build_network_line
@@ -1161,6 +2084,7 @@ YAML
     profiles:
       - test
 YAML
+    _emit_logging_block test
     if [[ -n "${_net_name}" ]]; then
       cat <<YAML
 
@@ -1216,13 +2140,14 @@ write_env() {
   local _gpu_caps="${1}"; shift
   local _gui_detected="${1}"; shift
   local _conf_hash="${1}"; shift
+  local _dockerfile_hash="${1}"; shift
   local _network_name="${1:-}"; shift || true
   local _user_build_args="${1:-}"; shift || true
   local _target_arch="${1:-}"; shift || true
   local _build_network="${1:-}"
 
   local _comment=""
-  _comment="$(_setup_msg env_comment)"
+  _comment="$(_setup_msg env comment)"
   cat > "${_env_file}" << EOF
 # Auto-generated by setup.sh on $(date '+%Y-%m-%d %H:%M:%S')
 # ${_comment}
@@ -1257,6 +2182,7 @@ GPU_CAPABILITIES="${_gpu_caps}"
 
 # ── Setup metadata (drift detection — do not edit) ──
 SETUP_CONF_HASH=${_conf_hash}
+SETUP_DOCKERFILE_HASH=${_dockerfile_hash}
 SETUP_GUI_DETECTED=${_gui_detected}
 SETUP_TIMESTAMP=$(date -Iseconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S%z')
 EOF
@@ -1316,27 +2242,31 @@ _check_setup_drift() {
   [[ -f "${_env_file}" ]] || return 0
 
   # Read stored values from .env without polluting caller's env
-  local _stored_hash="" _stored_gui="" _stored_gpu="" _stored_uid=""
-  _stored_hash="$(grep -oP '^SETUP_CONF_HASH=\K.*'    "${_env_file}" 2>/dev/null || true)"
-  _stored_gui="$( grep -oP '^SETUP_GUI_DETECTED=\K.*' "${_env_file}" 2>/dev/null || true)"
-  _stored_gpu="$( grep -oP '^GPU_ENABLED=\K.*'        "${_env_file}" 2>/dev/null || true)"
-  _stored_uid="$( grep -oP '^USER_UID=\K.*'           "${_env_file}" 2>/dev/null || true)"
+  local _stored_hash="" _stored_df_hash="" _stored_gui="" _stored_gpu="" _stored_uid=""
+  _stored_hash="$(   grep -oP '^SETUP_CONF_HASH=\K.*'       "${_env_file}" 2>/dev/null || true)"
+  _stored_df_hash="$(grep -oP '^SETUP_DOCKERFILE_HASH=\K.*' "${_env_file}" 2>/dev/null || true)"
+  _stored_gui="$(    grep -oP '^SETUP_GUI_DETECTED=\K.*'    "${_env_file}" 2>/dev/null || true)"
+  _stored_gpu="$(    grep -oP '^GPU_ENABLED=\K.*'           "${_env_file}" 2>/dev/null || true)"
+  _stored_uid="$(    grep -oP '^USER_UID=\K.*'              "${_env_file}" 2>/dev/null || true)"
 
-  local _now_hash="" _now_gui="" _now_gpu=""
-  _compute_conf_hash "${_base}" _now_hash
+  local _now_hash="" _now_df_hash="" _now_gui="" _now_gpu=""
+  _compute_conf_hash       "${_base}" _now_hash
+  _compute_dockerfile_hash "${_base}" _now_df_hash
   detect_gui _now_gui
   detect_gpu _now_gpu
   local _now_uid=""
   _now_uid="$(id -u)"
 
   local -a _drift=()
-  [[ -n "${_stored_hash}" && "${_now_hash}" != "${_stored_hash}" ]] \
+  [[ -n "${_stored_hash}"    && "${_now_hash}"    != "${_stored_hash}"    ]] \
     && _drift+=("setup.conf modified since last setup")
-  [[ -n "${_stored_gpu}"  && "${_now_gpu}"  != "${_stored_gpu}"  ]] \
+  [[ -n "${_stored_df_hash}" && "${_now_df_hash}" != "${_stored_df_hash}" ]] \
+    && _drift+=("Dockerfile stage list changed since last setup (added/removed FROM ... AS <stage>)")
+  [[ -n "${_stored_gpu}"     && "${_now_gpu}"     != "${_stored_gpu}"     ]] \
     && _drift+=("GPU detection changed: ${_stored_gpu} → ${_now_gpu}")
-  [[ -n "${_stored_gui}"  && "${_now_gui}"  != "${_stored_gui}"  ]] \
+  [[ -n "${_stored_gui}"     && "${_now_gui}"     != "${_stored_gui}"     ]] \
     && _drift+=("GUI detection changed: ${_stored_gui} → ${_now_gui}")
-  [[ -n "${_stored_uid}"  && "${_now_uid}"  != "${_stored_uid}"  ]] \
+  [[ -n "${_stored_uid}"     && "${_now_uid}"     != "${_stored_uid}"     ]] \
     && _drift+=("USER_UID changed: ${_stored_uid} → ${_now_uid}")
 
   if (( ${#_drift[@]} > 0 )); then
@@ -1382,7 +2312,7 @@ _setup_check_drift() {
         shift 2
         ;;
       *)
-        printf "[setup] %s: %s\n" "$(_setup_msg unknown_arg)" "$1" >&2
+        _log_err setup "$(_setup_msg errors unknown_arg): $1"
         return 1
         ;;
     esac
@@ -1412,11 +2342,11 @@ _announce_template_default_fallback() {
   local _base="${1:?"${FUNCNAME[0]}: missing base_path"}"
   # Existence check tracks the per-repo override file (setup.conf), the
   # source of truth post-#201.
-  local _repo_conf="${_base}/setup.conf"
+  local _repo_conf="${_base}/config/docker/setup.conf"
   if [[ ! -f "${_repo_conf}" ]]; then
-    printf "[setup] WARN: %s\n" "$(_setup_msg warn_no_repo_conf)" >&2
+    _log_warn setup "$(_setup_msg warnings no_repo_conf)"
   elif ! grep -qE '^[[:space:]]*\[[^]]+\]' "${_repo_conf}"; then
-    printf "[setup] WARN: %s\n" "$(_setup_msg warn_empty_repo_conf)" >&2
+    _log_warn setup "$(_setup_msg warnings empty_repo_conf)"
   fi
 }
 
@@ -1524,11 +2454,12 @@ _setup_validate_kv() {
 # `apply` explicitly when they want the derived artifacts refreshed.
 #
 # Usage: _setup_set <section>.<key> <value> [--base-path PATH]
-#                                           [--lang LANG]
+#                                           [--lang LANG] [-q|--quiet]
 # ════════════════════════════════════════════════════════════════════
 _setup_set() {
   local _base_path=""
   local _spec="" _value="" _have_value=0
+  local _quiet=0
 
   while [[ $# -gt 0 ]]; do
     # Once <spec> is captured the next bare arg is the value, even if
@@ -1536,7 +2467,7 @@ _setup_set() {
     # invalid value path that the validator must reject — not a flag).
     if [[ -n "${_spec}" && "${_have_value}" -eq 0 ]]; then
       case "$1" in
-        --base-path|--lang|-h|--help)
+        --base-path|--lang|-q|--quiet|-h|--help)
           ;;
         *)
           _value="$1"; _have_value=1; shift
@@ -1557,6 +2488,10 @@ _setup_set() {
         _sanitize_lang _LANG "setup"
         shift 2
         ;;
+      -q|--quiet)
+        _quiet=1
+        shift
+        ;;
       --)
         shift
         if [[ $# -gt 0 && -z "${_spec}" ]]; then
@@ -1567,7 +2502,7 @@ _setup_set() {
         fi
         ;;
       -*)
-        printf "[setup] %s: %s\n" "$(_setup_msg unknown_arg)" "$1" >&2
+        _log_err setup "$(_setup_msg errors unknown_arg): $1"
         return 1
         ;;
       *)
@@ -1576,7 +2511,7 @@ _setup_set() {
         elif [[ "${_have_value}" -eq 0 ]]; then
           _value="$1"; _have_value=1
         else
-          printf "[setup] %s: %s\n" "$(_setup_msg unknown_arg)" "$1" >&2
+          _log_err setup "$(_setup_msg errors unknown_arg): $1"
           return 1
         fi
         shift
@@ -1585,31 +2520,30 @@ _setup_set() {
   done
 
   if [[ -z "${_spec}" || "${_have_value}" -eq 0 ]]; then
-    _setup_msg usage_set >&2
+    _setup_msg usage set >&2
     return 1
   fi
 
   # Split <section>.<key>; the first '.' is the separator (keys
   # themselves never contain dots in setup.conf).
   if [[ "${_spec}" != *.* ]]; then
-    _setup_msg usage_set >&2
+    _setup_msg usage set >&2
     return 1
   fi
   local _section="${_spec%%.*}"
   local _key="${_spec#*.}"
   if [[ -z "${_section}" || -z "${_key}" ]]; then
-    _setup_msg usage_set >&2
+    _setup_msg usage set >&2
     return 1
   fi
 
   if ! _setup_known_section "${_section}"; then
-    printf "[setup] %s: %s\n" "$(_setup_msg unknown_section)" "${_section}" >&2
+    _log_err setup "$(_setup_msg errors unknown_section): ${_section}"
     return 2
   fi
 
   if ! _setup_validate_kv "${_section}" "${_key}" "${_value}"; then
-    printf "[setup] %s: %s.%s = %s\n" \
-      "$(_setup_msg invalid_value)" "${_section}" "${_key}" "${_value}" >&2
+    _log_err setup "$(_setup_msg errors invalid_value): ${_section}.${_key} = ${_value}"
     return 2
   fi
 
@@ -1620,12 +2554,18 @@ _setup_set() {
   # Writes target the per-repo override file (setup.conf). Bootstrap
   # as empty when missing — `set` records only the user's intent, never
   # copies template defaults wholesale.
-  local _conf="${_base_path}/setup.conf"
+  local _conf="${_base_path}/config/docker/setup.conf"
   if [[ ! -f "${_conf}" ]]; then
     : > "${_conf}"
   fi
 
   _upsert_conf_value "${_conf}" "${_section}" "${_key}" "${_value}"
+
+  if [[ "${_quiet}" -eq 0 ]]; then
+    printf '[setup] set [%s] %s = %s\n' "${_section}" "${_key}" "${_value}"
+    printf '[setup] file: %s\n' "${_conf}"
+    printf "[setup] next: run './setup.sh apply' to regenerate .env + compose.yaml\n"
+  fi
 }
 
 # ════════════════════════════════════════════════════════════════════
@@ -1662,14 +2602,14 @@ _setup_show() {
         shift 2
         ;;
       -*)
-        printf "[setup] %s: %s\n" "$(_setup_msg unknown_arg)" "$1" >&2
+        _log_err setup "$(_setup_msg errors unknown_arg): $1"
         return 1
         ;;
       *)
         if [[ -z "${_spec}" ]]; then
           _spec="$1"
         else
-          printf "[setup] %s: %s\n" "$(_setup_msg unknown_arg)" "$1" >&2
+          _log_err setup "$(_setup_msg errors unknown_arg): $1"
           return 1
         fi
         shift
@@ -1678,7 +2618,7 @@ _setup_show() {
   done
 
   if [[ -z "${_spec}" ]]; then
-    _setup_msg usage_show >&2
+    _setup_msg usage show >&2
     return 1
   fi
 
@@ -1692,7 +2632,7 @@ _setup_show() {
   fi
 
   if ! _setup_known_section "${_section}"; then
-    printf "[setup] %s: %s\n" "$(_setup_msg unknown_section)" "${_section}" >&2
+    _log_err setup "$(_setup_msg errors unknown_section): ${_section}"
     return 2
   fi
 
@@ -1703,8 +2643,8 @@ _setup_show() {
   # show reads the merged view (template baseline ← repo override).
   # This is what `apply` would produce, so users see effective values
   # without having to re-run apply after every set/add/remove.
-  local _repo_conf="${_base_path}/setup.conf"
-  local _tpl_conf="${_SETUP_SCRIPT_DIR}/../../setup.conf"
+  local _repo_conf="${_base_path}/config/docker/setup.conf"
+  local _tpl_conf="${_SETUP_SCRIPT_DIR}/../../config/docker/setup.conf"
   local -a _ss_sections=() _ss_keys=() _ss_values=()
   _setup_load_merged_full "${_tpl_conf}" "${_repo_conf}" \
       _ss_sections _ss_keys _ss_values
@@ -1717,7 +2657,7 @@ _setup_show() {
         return 0
       fi
     done
-    printf "[setup] %s: %s\n" "$(_setup_msg key_not_found)" "${_ns_key}" >&2
+    _log_err setup "$(_setup_msg errors key_not_found): ${_ns_key}"
     return 1
   fi
 
@@ -1730,7 +2670,7 @@ _setup_show() {
     fi
   done
   if (( _printed == 0 )); then
-    printf "[setup] %s: %s\n" "$(_setup_msg section_not_found)" "${_section}" >&2
+    _log_err setup "$(_setup_msg errors section_not_found): ${_section}"
     return 1
   fi
   return 0
@@ -1765,14 +2705,14 @@ _setup_list() {
         shift 2
         ;;
       -*)
-        printf "[setup] %s: %s\n" "$(_setup_msg unknown_arg)" "$1" >&2
+        _log_err setup "$(_setup_msg errors unknown_arg): $1"
         return 1
         ;;
       *)
         if [[ -z "${_spec}" ]]; then
           _spec="$1"
         else
-          printf "[setup] %s: %s\n" "$(_setup_msg unknown_arg)" "$1" >&2
+          _log_err setup "$(_setup_msg errors unknown_arg): $1"
           return 1
         fi
         shift
@@ -1798,8 +2738,8 @@ _setup_list() {
 
   # list reads the merged view (template ← repo override) — same
   # rationale as `show`. Reflects what `apply` would materialize.
-  local _repo_conf="${_base_path}/setup.conf"
-  local _tpl_conf="${_SETUP_SCRIPT_DIR}/../../setup.conf"
+  local _repo_conf="${_base_path}/config/docker/setup.conf"
+  local _tpl_conf="${_SETUP_SCRIPT_DIR}/../../config/docker/setup.conf"
   local -a _ll_sections=() _ll_keys=() _ll_values=()
   _setup_load_merged_full "${_tpl_conf}" "${_repo_conf}" \
       _ll_sections _ll_keys _ll_values
@@ -1843,6 +2783,7 @@ _setup_list() {
 _setup_add() {
   local _base_path=""
   local _spec="" _value="" _have_value=0
+  local _quiet=0
 
   while [[ $# -gt 0 ]]; do
     # Once <spec> is captured, the next bare arg is the value, even if
@@ -1850,7 +2791,7 @@ _setup_add() {
     # flags). Same shape as _setup_set.
     if [[ -n "${_spec}" && "${_have_value}" -eq 0 ]]; then
       case "$1" in
-        --base-path|--lang|-h|--help)
+        --base-path|--lang|-q|--quiet|-h|--help)
           ;;
         *)
           _value="$1"; _have_value=1; shift
@@ -1871,6 +2812,10 @@ _setup_add() {
         _sanitize_lang _LANG "setup"
         shift 2
         ;;
+      -q|--quiet)
+        _quiet=1
+        shift
+        ;;
       --)
         shift
         if [[ $# -gt 0 && -z "${_spec}" ]]; then
@@ -1881,7 +2826,7 @@ _setup_add() {
         fi
         ;;
       -*)
-        printf "[setup] %s: %s\n" "$(_setup_msg unknown_arg)" "$1" >&2
+        _log_err setup "$(_setup_msg errors unknown_arg): $1"
         return 1
         ;;
       *)
@@ -1890,7 +2835,7 @@ _setup_add() {
         elif [[ "${_have_value}" -eq 0 ]]; then
           _value="$1"; _have_value=1
         else
-          printf "[setup] %s: %s\n" "$(_setup_msg unknown_arg)" "$1" >&2
+          _log_err setup "$(_setup_msg errors unknown_arg): $1"
           return 1
         fi
         shift
@@ -1899,23 +2844,23 @@ _setup_add() {
   done
 
   if [[ -z "${_spec}" || "${_have_value}" -eq 0 ]]; then
-    _setup_msg usage_add >&2
+    _setup_msg usage add >&2
     return 1
   fi
 
   if [[ "${_spec}" != *.* ]]; then
-    _setup_msg usage_add >&2
+    _setup_msg usage add >&2
     return 1
   fi
   local _section="${_spec%%.*}"
   local _list="${_spec#*.}"
   if [[ -z "${_section}" || -z "${_list}" ]]; then
-    _setup_msg usage_add >&2
+    _setup_msg usage add >&2
     return 1
   fi
 
   if ! _setup_known_section "${_section}"; then
-    printf "[setup] %s: %s\n" "$(_setup_msg unknown_section)" "${_section}" >&2
+    _log_err setup "$(_setup_msg errors unknown_section): ${_section}"
     return 2
   fi
 
@@ -1924,7 +2869,7 @@ _setup_add() {
   fi
   # Writes target the per-repo override (setup.conf); bootstrap as
   # empty when missing — `add` records only the user's intent.
-  local _conf="${_base_path}/setup.conf"
+  local _conf="${_base_path}/config/docker/setup.conf"
   if [[ ! -f "${_conf}" ]]; then
     : > "${_conf}"
   fi
@@ -1937,7 +2882,7 @@ _setup_add() {
   # lands past any inherited template slot the user hasn't yet bumped.
   local -a _sects=() _keys=() _vals=()
   local -a _local_k=() _local_v=()
-  local _tpl_conf="${_SETUP_SCRIPT_DIR}/../../setup.conf"
+  local _tpl_conf="${_SETUP_SCRIPT_DIR}/../../config/docker/setup.conf"
   _parse_ini_section "${_conf}" "${_section}" _local_k _local_v
   if (( ${#_local_k[@]} > 0 )); then
     # Override section present — replace strategy: only .local entries
@@ -1982,12 +2927,17 @@ _setup_add() {
   local _new_key="${_list}_${_new_idx}"
 
   if ! _setup_validate_kv "${_section}" "${_new_key}" "${_value}"; then
-    printf "[setup] %s: %s.%s = %s\n" \
-      "$(_setup_msg invalid_value)" "${_section}" "${_new_key}" "${_value}" >&2
+    _log_err setup "$(_setup_msg errors invalid_value): ${_section}.${_new_key} = ${_value}"
     return 2
   fi
 
   _upsert_conf_value "${_conf}" "${_section}" "${_new_key}" "${_value}"
+
+  if [[ "${_quiet}" -eq 0 ]]; then
+    printf '[setup] add [%s] %s = %s\n' "${_section}" "${_new_key}" "${_value}"
+    printf '[setup] file: %s\n' "${_conf}"
+    printf "[setup] next: run './setup.sh apply' to regenerate .env + compose.yaml\n"
+  fi
 }
 
 # ════════════════════════════════════════════════════════════════════
@@ -2012,11 +2962,12 @@ _setup_add() {
 _setup_remove() {
   local _base_path=""
   local _spec="" _value="" _have_value=0
+  local _quiet=0
 
   while [[ $# -gt 0 ]]; do
     if [[ -n "${_spec}" && "${_have_value}" -eq 0 ]]; then
       case "$1" in
-        --base-path|--lang|-h|--help)
+        --base-path|--lang|-q|--quiet|-h|--help)
           ;;
         *)
           _value="$1"; _have_value=1; shift
@@ -2037,6 +2988,10 @@ _setup_remove() {
         _sanitize_lang _LANG "setup"
         shift 2
         ;;
+      -q|--quiet)
+        _quiet=1
+        shift
+        ;;
       --)
         shift
         if [[ $# -gt 0 && -z "${_spec}" ]]; then
@@ -2047,7 +3002,7 @@ _setup_remove() {
         fi
         ;;
       -*)
-        printf "[setup] %s: %s\n" "$(_setup_msg unknown_arg)" "$1" >&2
+        _log_err setup "$(_setup_msg errors unknown_arg): $1"
         return 1
         ;;
       *)
@@ -2056,7 +3011,7 @@ _setup_remove() {
         elif [[ "${_have_value}" -eq 0 ]]; then
           _value="$1"; _have_value=1
         else
-          printf "[setup] %s: %s\n" "$(_setup_msg unknown_arg)" "$1" >&2
+          _log_err setup "$(_setup_msg errors unknown_arg): $1"
           return 1
         fi
         shift
@@ -2065,18 +3020,18 @@ _setup_remove() {
   done
 
   if [[ -z "${_spec}" || "${_spec}" != *.* ]]; then
-    _setup_msg usage_remove >&2
+    _setup_msg usage remove >&2
     return 1
   fi
   local _section="${_spec%%.*}"
   local _rest="${_spec#*.}"
   if [[ -z "${_section}" || -z "${_rest}" ]]; then
-    _setup_msg usage_remove >&2
+    _setup_msg usage remove >&2
     return 1
   fi
 
   if ! _setup_known_section "${_section}"; then
-    printf "[setup] %s: %s\n" "$(_setup_msg unknown_section)" "${_section}" >&2
+    _log_err setup "$(_setup_msg errors unknown_section): ${_section}"
     return 2
   fi
 
@@ -2086,9 +3041,9 @@ _setup_remove() {
   # remove only operates on the per-repo override. If setup.conf
   # doesn't exist, there's nothing to remove (template baseline isn't
   # a removable input).
-  local _conf="${_base_path}/setup.conf"
+  local _conf="${_base_path}/config/docker/setup.conf"
   if [[ ! -f "${_conf}" ]]; then
-    printf "[setup] %s: %s\n" "$(_setup_msg key_not_found)" "${_spec}" >&2
+    _log_err setup "$(_setup_msg errors key_not_found): ${_spec}"
     return 1
   fi
 
@@ -2106,8 +3061,7 @@ _setup_remove() {
       fi
     done
     if [[ -z "${_target_key}" ]]; then
-      printf "[setup] %s: %s.%s = %s\n" \
-        "$(_setup_msg key_not_found)" "${_section}" "${_rest}" "${_value}" >&2
+      _log_err setup "$(_setup_msg errors key_not_found): ${_section}.${_rest} = ${_value}"
       return 1
     fi
   else
@@ -2120,7 +3074,7 @@ _setup_remove() {
       fi
     done
     if (( ! _found )); then
-      printf "[setup] %s: %s\n" "$(_setup_msg key_not_found)" "${_spec}" >&2
+      _log_err setup "$(_setup_msg errors key_not_found): ${_spec}"
       return 1
     fi
     _target_key="${_rest}"
@@ -2136,6 +3090,12 @@ _setup_remove() {
   _write_setup_conf "${_conf}" "${_tmp}" \
     _empty_s _empty_k _empty_v "${_section}.${_target_key}"
   rm -f "${_tmp}"
+
+  if [[ "${_quiet}" -eq 0 ]]; then
+    printf '[setup] remove [%s] %s\n' "${_section}" "${_target_key}"
+    printf '[setup] file: %s\n' "${_conf}"
+    printf "[setup] next: run './setup.sh apply' to regenerate .env + compose.yaml\n"
+  fi
 }
 
 # ════════════════════════════════════════════════════════════════════
@@ -2161,6 +3121,7 @@ _setup_remove() {
 _setup_reset() {
   local _base_path=""
   local _yes=0
+  local _quiet=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -2169,6 +3130,10 @@ _setup_reset() {
         ;;
       -y|--yes)
         _yes=1
+        shift
+        ;;
+      -q|--quiet)
+        _quiet=1
         shift
         ;;
       --base-path)
@@ -2181,7 +3146,7 @@ _setup_reset() {
         shift 2
         ;;
       *)
-        printf "[setup] %s: %s\n" "$(_setup_msg unknown_arg)" "$1" >&2
+        _log_err setup "$(_setup_msg errors unknown_arg): $1"
         return 1
         ;;
     esac
@@ -2195,9 +3160,9 @@ _setup_reset() {
   # rebuilds .env + compose.yaml purely from the template baseline. The
   # workspace mount_1 is re-detected and re-written via the bootstrap
   # path on the next apply.
-  local _conf="${_base_path}/setup.conf"
+  local _conf="${_base_path}/config/docker/setup.conf"
   local _env="${_base_path}/.env"
-  local _tpl_conf="${_SETUP_SCRIPT_DIR}/../../setup.conf"
+  local _tpl_conf="${_SETUP_SCRIPT_DIR}/../../config/docker/setup.conf"
   if [[ ! -f "${_tpl_conf}" ]]; then
     printf "[setup] template setup.conf not found at %s\n" "${_tpl_conf}" >&2
     return 1
@@ -2205,16 +3170,16 @@ _setup_reset() {
 
   if (( ! _yes )); then
     if [[ ! -t 0 ]]; then
-      printf "[setup] %s\n" "$(_setup_msg reset_needs_yes)" >&2
+      _log_err setup "$(_setup_msg reset needs_yes)"
       return 1
     fi
-    printf "[setup] %s [y/N]: " "$(_setup_msg reset_confirm)"
+    printf "[setup] %s [y/N]: " "$(_setup_msg reset confirm)"
     local _ans=""
     read -r _ans
     case "${_ans}" in
       y|Y|yes|YES) ;;
       *)
-        printf "[setup] %s\n" "$(_setup_msg reset_aborted)" >&2
+        _log_warn setup "$(_setup_msg reset aborted)"
         return 1
         ;;
     esac
@@ -2229,7 +3194,11 @@ _setup_reset() {
     cp -f "${_env}" "${_env}.bak"
   fi
 
-  printf "[setup] %s\n" "$(_setup_msg reset_done)"
+  if [[ "${_quiet}" -eq 0 ]]; then
+    _log_info setup "$(_setup_msg reset "done")"
+    printf '[setup] file: %s\n' "${_conf}"
+    printf "[setup] next: run './setup.sh apply' to regenerate .env + compose.yaml\n"
+  fi
 }
 
 # ════════════════════════════════════════════════════════════════════
@@ -2244,6 +3213,7 @@ _setup_reset() {
 # ════════════════════════════════════════════════════════════════════
 _setup_apply() {
   local _base_path=""
+  local _quiet=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -2259,8 +3229,12 @@ _setup_apply() {
         _sanitize_lang _LANG "setup"
         shift 2
         ;;
+      -q|--quiet)
+        _quiet=1
+        shift
+        ;;
       *)
-        printf "[setup] %s: %s\n" "$(_setup_msg unknown_arg)" "$1" >&2
+        _log_err setup "$(_setup_msg errors unknown_arg): $1"
         return 1
         ;;
     esac
@@ -2402,7 +3376,7 @@ _setup_apply() {
   #
   # First-time bootstrap (no <repo>/setup.conf) copies the template and
   # writes mount_1 in the portable form.
-  local _repo_conf="${_base_path}/setup.conf"
+  local _repo_conf="${_base_path}/config/docker/setup.conf"
   local _mount_1=""
   _get_conf_value _vol_k _vol_v "mount_1" "" _mount_1
 
@@ -2422,8 +3396,11 @@ _setup_apply() {
     fi
     [[ -d "${ws_path}" ]] && ws_path="$(cd "${ws_path}" && pwd -P)"
     local _tpl_conf
-    _tpl_conf="${_SETUP_SCRIPT_DIR}/../../setup.conf"
+    _tpl_conf="${_SETUP_SCRIPT_DIR}/../../config/docker/setup.conf"
     if [[ -f "${_tpl_conf}" ]]; then
+      # Ensure config/docker/ parent dir exists before cp (post-#262
+      # path; first-time bootstrap on a fresh repo will not have it).
+      mkdir -p "$(dirname "${_repo_conf}")"
       cp "${_tpl_conf}" "${_repo_conf}"
       _upsert_conf_value "${_repo_conf}" "volumes" "mount_1" \
         "${_ws_portable_form}"
@@ -2519,7 +3496,7 @@ _setup_apply() {
   # down default — avoids surprising the user with "my container lost
   # SYS_ADMIN / unconfined seccomp after I cleared the list".
   local _tpl_setup_conf
-  _tpl_setup_conf="${_SETUP_SCRIPT_DIR}/../../setup.conf"
+  _tpl_setup_conf="${_SETUP_SCRIPT_DIR}/../../config/docker/setup.conf"
   local -a _tpl_sec_k=() _tpl_sec_v=()
   [[ -f "${_tpl_setup_conf}" ]] \
     && _parse_ini_section "${_tpl_setup_conf}" "security" _tpl_sec_k _tpl_sec_v
@@ -2549,14 +3526,23 @@ _setup_apply() {
   local _shm_size=""
   _get_conf_value _res_k _res_v "shm_size" "" _shm_size
 
+  # ── [logging] + [logging.<svc>] (#310) ──
+  local _logging_global_str="" _logging_per_svc_str=""
+  _collect_logging "${_base_path}" _logging_global_str _logging_per_svc_str
+
   # ── Resolve final enabled states ──
   local gpu_enabled_eff="" gui_enabled_eff=""
   _resolve_gpu "${gpu_mode}" "${gpu_detected}" gpu_enabled_eff
   _resolve_gui "${gui_mode}" "${gui_detected}" gui_enabled_eff
 
-  # ── Compute hash for drift detection ──
+  # ── Compute hashes for drift detection ──
   local conf_hash=""
   _compute_conf_hash "${_base_path}" conf_hash
+  # Dockerfile hash covers the stage-list projection only — adds /
+  # removes / renames an `^FROM ... AS <stage>` line, but unrelated
+  # `RUN apt-get install` edits do not trigger compose regen.
+  local dockerfile_hash=""
+  _compute_dockerfile_hash "${_base_path}" dockerfile_hash
 
   # Join user-added build args (newline-separated) for write_env.
   local _user_build_args_str=""
@@ -2572,7 +3558,7 @@ _setup_apply() {
     "${apt_mirror_ubuntu}" "${apt_mirror_debian}" "${tz}" \
     "${net_mode}" "${ipc_mode}" "${privileged}" \
     "${gpu_count}" "${gpu_caps}" \
-    "${gui_detected}" "${conf_hash}" \
+    "${gui_detected}" "${conf_hash}" "${dockerfile_hash}" \
     "${network_name}" \
     "${_user_build_args_str}" \
     "${target_arch}" \
@@ -2581,6 +3567,10 @@ _setup_apply() {
   local runtime_resolved=""
   _resolve_runtime "${runtime_mode}" runtime_resolved
 
+  # Propagate generate_compose_yaml's exit explicitly: when sourced
+  # (no `set -e`) a hard-error return from the stage validator (#215
+  # baseline collision / reserved-tag) would otherwise be swallowed
+  # and apply would print "updated" with a half-written compose.yaml.
   generate_compose_yaml "${_base_path}/compose.yaml" "${image_name}" \
     "${gui_enabled_eff}" "${gpu_enabled_eff}" \
     "${gpu_count}" "${gpu_caps}" \
@@ -2594,14 +3584,19 @@ _setup_apply() {
     "${target_arch}" \
     "${build_network}" \
     "${runtime_resolved}" \
-    "${_additional_contexts_str}"
+    "${_additional_contexts_str}" \
+    "${_logging_global_str}" \
+    "${_logging_per_svc_str}" \
+    || return $?
 
-  printf "[setup] %s\n" "$(_setup_msg env_done)"
-  printf "[setup] USER=%s (%s:%s)  GPU=%s/%s  GUI=%s/%s  IMAGE=%s  WS=%s\n" \
-    "${user_name}" "${user_uid}" "${user_gid}" \
-    "${gpu_enabled_eff}" "${gpu_mode}" \
-    "${gui_enabled_eff}" "${gui_mode}" \
-    "${image_name}" "${ws_path}"
+  if [[ "${_quiet}" -eq 0 ]]; then
+    _log_info setup "$(_setup_msg env "done")"
+    printf "[setup] USER=%s (%s:%s)  GPU=%s/%s  GUI=%s/%s  IMAGE=%s  WS=%s\n" \
+      "${user_name}" "${user_uid}" "${user_gid}" \
+      "${gpu_enabled_eff}" "${gpu_mode}" \
+      "${gui_enabled_eff}" "${gui_mode}" \
+      "${image_name}" "${ws_path}"
+  fi
 }
 
 # ════════════════════════════════════════════════════════════════════
@@ -2638,7 +3633,7 @@ main() {
       shift
       ;;
     *)
-      printf "[setup] %s: %s\n" "$(_setup_msg unknown_subcmd)" "$1" >&2
+      _log_err setup "$(_setup_msg errors unknown_subcmd): $1"
       return 1
       ;;
   esac

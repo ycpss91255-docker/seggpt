@@ -28,14 +28,14 @@ setup() {
   REPO_NAME="myapp_test"
   TMP_ROOT="$(mktemp -d)"
   REPO_DIR="${TMP_ROOT}/${REPO_NAME}"
-  mkdir -p "${REPO_DIR}/template"
-  cp -a /source/. "${REPO_DIR}/template/"
+  mkdir -p "${REPO_DIR}/.base"
+  cp -a /source/. "${REPO_DIR}/.base/"
 
   # Make the repo look like a committed consumer repo: Dockerfile is
   # present (so init.sh's existing-repo path fires), build.sh is
   # symlinked exactly as init.sh would have produced it.
   touch "${REPO_DIR}/Dockerfile"
-  ln -s template/script/docker/build.sh "${REPO_DIR}/build.sh"
+  ln -s .base/script/docker/build.sh "${REPO_DIR}/build.sh"
 
   cd "${REPO_DIR}"
 }
@@ -51,10 +51,11 @@ teardown() {
 # an absolute host path that does NOT exist on the current machine.
 _seed_stale_setup_conf() {
   local _host="$1"
-  cp "${REPO_DIR}/template/setup.conf" "${REPO_DIR}/setup.conf"
+  mkdir -p "${REPO_DIR}/config/docker"
+  cp "${REPO_DIR}/.base/config/docker/setup.conf" "${REPO_DIR}/config/docker/setup.conf"
   # shellcheck disable=SC2016  # ${USER_NAME} is a literal in setup.conf
   sed -i "s|^mount_1 =.*|mount_1 = ${_host}:/home/\${USER_NAME}/work|" \
-    "${REPO_DIR}/setup.conf"
+    "${REPO_DIR}/config/docker/setup.conf"
 }
 
 # ════════════════════════════════════════════════════════════════════
@@ -73,7 +74,7 @@ _seed_stale_setup_conf() {
   # regardless — the stale value never reaches WS_PATH.
   _seed_stale_setup_conf "/nonexistent/contributor-a/repo"
 
-  assert [ -f "${REPO_DIR}/setup.conf" ]
+  assert [ -f "${REPO_DIR}/config/docker/setup.conf" ]
   assert [ ! -f "${REPO_DIR}/.env" ]
   assert [ ! -f "${REPO_DIR}/compose.yaml" ]
 
@@ -100,10 +101,11 @@ _seed_stale_setup_conf() {
 @test "fresh clone with portable \${WS_PATH} mount_1: no warning, .env gets local path" {
   # Same shape as above but with a repo whose committed setup.conf
   # already uses the portable form (the happy case after v0.9.4+).
-  cp "${REPO_DIR}/template/setup.conf" "${REPO_DIR}/setup.conf"
+  mkdir -p "${REPO_DIR}/config/docker"
+  cp "${REPO_DIR}/.base/config/docker/setup.conf" "${REPO_DIR}/config/docker/setup.conf"
   # shellcheck disable=SC2016  # literal ${WS_PATH} / ${USER_NAME} intentional
   sed -i 's|^mount_1 =.*|mount_1 = ${WS_PATH}:/home/${USER_NAME}/work|' \
-    "${REPO_DIR}/setup.conf"
+    "${REPO_DIR}/config/docker/setup.conf"
 
   run bash "${REPO_DIR}/build.sh" --dry-run
   assert_success
@@ -111,7 +113,7 @@ _seed_stale_setup_conf() {
   refute_output --partial "WARNING"
 
   # mount_1 stays as the portable form.
-  run grep '^mount_1' "${REPO_DIR}/setup.conf"
+  run grep '^mount_1' "${REPO_DIR}/config/docker/setup.conf"
   assert_output --partial 'mount_1 = ${WS_PATH}:/home/${USER_NAME}/work'
 
   # .env populated with this machine's WS_PATH (non-empty, absolute).

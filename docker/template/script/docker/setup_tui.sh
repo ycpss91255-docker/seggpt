@@ -51,12 +51,42 @@ _TUI_MSG_EN[main.advanced]="Advanced"
 _TUI_MSG_EN[main.save]="Save & Exit"
 _TUI_MSG_EN[main.security]="privileged / cap_add / security_opt"
 _TUI_MSG_EN[main.additional_contexts]="Named build contexts (build.additional_contexts)"
+_TUI_MSG_EN[main.runtime]="Runtime (network / GPU / display / env)"
+_TUI_MSG_EN[main.mounts]="Mounts (volumes / devices / tmpfs)"
+_TUI_MSG_EN[main.features]="Features (conditional / power-user)"
+_TUI_MSG_EN[runtime.title]="Runtime"
+_TUI_MSG_EN[runtime.menu]="Select a runtime section"
+_TUI_MSG_EN[runtime.back]="Back to main menu"
+_TUI_MSG_EN[mounts.title]="Mounts"
+_TUI_MSG_EN[mounts.menu]="Select a mount section"
+_TUI_MSG_EN[mounts.back]="Back to main menu"
+_TUI_MSG_EN[features.title]="Features"
+_TUI_MSG_EN[features.menu]="Conditional / power-user features"
+_TUI_MSG_EN[features.back]="Back to main menu"
+_TUI_MSG_EN[features.per_stage_enabled]="Per-stage overrides — enabled (%s stages)"
+_TUI_MSG_EN[features.per_stage_hidden]="Per-stage overrides — hidden (no non-baseline stages)"
+_TUI_MSG_EN[features.per_stage_hidden_info]=$'Per-stage overrides (#220)\n\nStatus: hidden\nReason: Dockerfile defines no non-baseline stage (sys, devel-base,\n        devel, devel-test, runtime-test are reserved baseline names;\n        legacy base / test still accepted during v0.21.x transition).\n\nEnable: add `FROM ... AS <stage>` for any custom name, then return\n        to this menu — the entry will activate automatically.'
 _TUI_MSG_EN[advanced.title]="Advanced"
 _TUI_MSG_EN[advanced.menu]="Select an advanced section"
 _TUI_MSG_EN[advanced.back]="Back to main menu"
 _TUI_MSG_EN[advanced.reset]="Reset to defaults"
+_TUI_MSG_EN[advanced.per_stage]="Per-stage overrides (#220)"
+_TUI_MSG_EN[per_stage.title]="Per-stage overrides"
+_TUI_MSG_EN[per_stage.menu]="Pick a stage to edit, or Back"
+_TUI_MSG_EN[per_stage.empty]=$'No non-baseline stages found in Dockerfile.\n\nPer-stage overrides apply to `FROM ... AS <name>` stages outside\nthe baseline blocklist {sys, devel-base, devel, devel-test,\nruntime-test} (legacy {base, test} also accepted during v0.21.x\ntransition). Add a stage to your Dockerfile first, then return here\nto override its runtime config.'
+_TUI_MSG_EN[per_stage.back]="Back"
+_TUI_MSG_EN[per_stage.overrides_set]="overrides set"
+_TUI_MSG_EN[per_stage.inherits_all]="(inherits all)"
+_TUI_MSG_EN[per_stage.one.menu]="Pick a section to edit, or Back"
+_TUI_MSG_EN[per_stage.scalar.menu]="Pick a key to edit, or Back"
+_TUI_MSG_EN[per_stage.scalar.prompt]=$'Override value\n  - Empty = inherit top-level (clear this override)\n  - For mode keys: auto / force / off (gui, gpu)\n  - For network mode: host / bridge / none\n  - For ipc: host / shareable / private\n  - For privileged: true / false\n  - For runtime: auto / nvidia / off'
+_TUI_MSG_EN[per_stage.list.menu]="Edit list entries, toggle inheritance, or Back"
+_TUI_MSG_EN[per_stage.list.entry_prompt]=$'List entry value\n  - Empty = delete this entry\n  - Format depends on the list (mount: host:container[:mode] / port: host:container[/proto] / env: KEY=VALUE)'
+_TUI_MSG_EN[per_stage.network.ports]="ports list (per-stage)"
+_TUI_MSG_EN[per_stage.inherit]="(inherit top-level — clear override)"
+_TUI_MSG_EN[per_stage.inherit_flag]="Inherit top-level entries"
 _TUI_MSG_EN[reset.title]="Reset to defaults"
-_TUI_MSG_EN[reset.confirm]=$'Reset ALL settings to template defaults?\n\n  - <repo>/setup.conf will be removed\n  - setup.sh re-runs to regenerate from template\n  - Your current customizations will be LOST\n\nThis cannot be undone.'
+_TUI_MSG_EN[reset.confirm]=$'Reset ALL settings to template defaults?\n\n  - <repo>/config/docker/setup.conf will be removed\n  - setup.sh re-runs to regenerate from template\n  - Your current customizations will be LOST\n\nThis cannot be undone.'
 _TUI_MSG_EN[reset.done]="All settings reset to template defaults."
 _TUI_MSG_EN[security.title]="Security"
 _TUI_MSG_EN[security.menu]="Select: privileged / cap_add / cap_drop / security_opt"
@@ -212,12 +242,42 @@ _TUI_MSG_ZH_TW[main.advanced]="進階"
 _TUI_MSG_ZH_TW[main.save]="儲存並結束"
 _TUI_MSG_ZH_TW[main.security]="privileged／cap_add／security_opt"
 _TUI_MSG_ZH_TW[main.additional_contexts]="具名 build context（build.additional_contexts）"
+_TUI_MSG_ZH_TW[main.runtime]="執行時期（網路／GPU／顯示／環境變數）"
+_TUI_MSG_ZH_TW[main.mounts]="掛載（volumes／devices／tmpfs）"
+_TUI_MSG_ZH_TW[main.features]="功能（條件式／進階使用）"
+_TUI_MSG_ZH_TW[runtime.title]="執行時期"
+_TUI_MSG_ZH_TW[runtime.menu]="選擇執行時期區段"
+_TUI_MSG_ZH_TW[runtime.back]="回主選單"
+_TUI_MSG_ZH_TW[mounts.title]="掛載"
+_TUI_MSG_ZH_TW[mounts.menu]="選擇掛載區段"
+_TUI_MSG_ZH_TW[mounts.back]="回主選單"
+_TUI_MSG_ZH_TW[features.title]="功能"
+_TUI_MSG_ZH_TW[features.menu]="條件式／進階使用功能"
+_TUI_MSG_ZH_TW[features.back]="回主選單"
+_TUI_MSG_ZH_TW[features.per_stage_enabled]="Per-stage overrides — 已啟用（%s 個 stage）"
+_TUI_MSG_ZH_TW[features.per_stage_hidden]="Per-stage overrides — 隱藏（無非 baseline stage）"
+_TUI_MSG_ZH_TW[features.per_stage_hidden_info]=$'Per-stage overrides (#220)\n\n狀態：隱藏\n原因：Dockerfile 沒有非 baseline stage（sys、devel-base、devel、\n      devel-test、runtime-test 為保留的 baseline 名稱；舊名 base、\n      test 在 v0.21.x 過渡期仍被接受）。\n\n啟用方式：在 Dockerfile 加上 `FROM ... AS <stage>`（任意自訂\n         名稱），再回到此選單，項目會自動啟用。'
 _TUI_MSG_ZH_TW[advanced.title]="Advanced"
 _TUI_MSG_ZH_TW[advanced.menu]="選擇進階區段"
 _TUI_MSG_ZH_TW[advanced.back]="回主選單"
 _TUI_MSG_ZH_TW[advanced.reset]="重置為預設值"
+_TUI_MSG_ZH_TW[advanced.per_stage]="Per-stage overrides (#220)"
+_TUI_MSG_ZH_TW[per_stage.title]="Per-stage overrides"
+_TUI_MSG_ZH_TW[per_stage.menu]="選擇要編輯的 stage，或返回"
+_TUI_MSG_ZH_TW[per_stage.empty]=$'Dockerfile 中沒有非 baseline 的 stage。\n\nPer-stage overrides 套用於 baseline {sys, devel-base, devel,\ndevel-test, runtime-test}（v0.21.x 過渡期同時接受舊名 {base, test}）\n以外的 `FROM ... AS <name>` stage。請先在 Dockerfile 中加入額外\nstage，再回來這裡 override 該 stage 的 runtime 設定。'
+_TUI_MSG_ZH_TW[per_stage.back]="返回"
+_TUI_MSG_ZH_TW[per_stage.overrides_set]="個 override"
+_TUI_MSG_ZH_TW[per_stage.inherits_all]="(全部繼承)"
+_TUI_MSG_ZH_TW[per_stage.one.menu]="選擇要編輯的 section，或返回"
+_TUI_MSG_ZH_TW[per_stage.scalar.menu]="選擇要編輯的 key，或返回"
+_TUI_MSG_ZH_TW[per_stage.scalar.prompt]=$'Override 值\n  - 空白 = 繼承 top-level（清除此 override）\n  - mode keys：auto / force / off (gui, gpu)\n  - network mode：host / bridge / none\n  - ipc：host / shareable / private\n  - privileged：true / false\n  - runtime：auto / nvidia / off'
+_TUI_MSG_ZH_TW[per_stage.list.menu]="編輯 list 項目、切換繼承、或返回"
+_TUI_MSG_ZH_TW[per_stage.list.entry_prompt]=$'List 項目值\n  - 空白 = 刪除此項目\n  - 格式依 list 不同（mount: host:container[:mode] / port: host:container[/proto] / env: KEY=VALUE）'
+_TUI_MSG_ZH_TW[per_stage.network.ports]="ports list (per-stage)"
+_TUI_MSG_ZH_TW[per_stage.inherit]="(繼承 top-level — 清除 override)"
+_TUI_MSG_ZH_TW[per_stage.inherit_flag]="繼承 top-level 項目"
 _TUI_MSG_ZH_TW[reset.title]="重置為預設值"
-_TUI_MSG_ZH_TW[reset.confirm]=$'重置所有設定為 template 預設值？\n\n  - 移除 <repo>/setup.conf\n  - 重跑 setup.sh 從 template 重建\n  - 你目前的客製化會遺失\n\n無法復原。'
+_TUI_MSG_ZH_TW[reset.confirm]=$'重置所有設定為 template 預設值？\n\n  - 移除 <repo>/config/docker/setup.conf\n  - 重跑 setup.sh 從 template 重建\n  - 你目前的客製化會遺失\n\n無法復原。'
 _TUI_MSG_ZH_TW[reset.done]="所有設定已重置為預設值。"
 _TUI_MSG_ZH_TW[security.title]="Security"
 _TUI_MSG_ZH_TW[security.menu]="選擇：privileged／cap_add／cap_drop／security_opt"
@@ -371,12 +431,42 @@ _TUI_MSG_ZH_CN[main.advanced]="进阶"
 _TUI_MSG_ZH_CN[main.save]="保存并退出"
 _TUI_MSG_ZH_CN[main.security]="privileged／cap_add／security_opt"
 _TUI_MSG_ZH_CN[main.additional_contexts]="具名 build context（build.additional_contexts）"
+_TUI_MSG_ZH_CN[main.runtime]="运行时（网络／GPU／显示／环境变量）"
+_TUI_MSG_ZH_CN[main.mounts]="挂载（volumes／devices／tmpfs）"
+_TUI_MSG_ZH_CN[main.features]="功能（条件式／进阶使用）"
+_TUI_MSG_ZH_CN[runtime.title]="运行时"
+_TUI_MSG_ZH_CN[runtime.menu]="选择运行时区段"
+_TUI_MSG_ZH_CN[runtime.back]="回主菜单"
+_TUI_MSG_ZH_CN[mounts.title]="挂载"
+_TUI_MSG_ZH_CN[mounts.menu]="选择挂载区段"
+_TUI_MSG_ZH_CN[mounts.back]="回主菜单"
+_TUI_MSG_ZH_CN[features.title]="功能"
+_TUI_MSG_ZH_CN[features.menu]="条件式／进阶使用功能"
+_TUI_MSG_ZH_CN[features.back]="回主菜单"
+_TUI_MSG_ZH_CN[features.per_stage_enabled]="Per-stage overrides — 已启用（%s 个 stage）"
+_TUI_MSG_ZH_CN[features.per_stage_hidden]="Per-stage overrides — 隐藏（无非 baseline stage）"
+_TUI_MSG_ZH_CN[features.per_stage_hidden_info]=$'Per-stage overrides (#220)\n\n状态：隐藏\n原因：Dockerfile 没有非 baseline stage（sys、devel-base、devel、\n      devel-test、runtime-test 为保留的 baseline 名称；旧名 base、\n      test 在 v0.21.x 过渡期仍被接受）。\n\n启用方式：在 Dockerfile 加上 `FROM ... AS <stage>`（任意自定\n         名称），再回到此菜单，项目会自动启用。'
 _TUI_MSG_ZH_CN[advanced.title]="Advanced"
 _TUI_MSG_ZH_CN[advanced.menu]="选择进阶区段"
 _TUI_MSG_ZH_CN[advanced.back]="回主菜单"
 _TUI_MSG_ZH_CN[advanced.reset]="重置为默认值"
+_TUI_MSG_ZH_CN[advanced.per_stage]="Per-stage overrides (#220)"
+_TUI_MSG_ZH_CN[per_stage.title]="Per-stage overrides"
+_TUI_MSG_ZH_CN[per_stage.menu]="选择要编辑的 stage，或返回"
+_TUI_MSG_ZH_CN[per_stage.empty]=$'Dockerfile 中没有非 baseline 的 stage。\n\nPer-stage overrides 应用于 baseline {sys, devel-base, devel,\ndevel-test, runtime-test}（v0.21.x 过渡期同时接受旧名 {base, test}）\n以外的 `FROM ... AS <name>` stage。请先在 Dockerfile 中加入额外\nstage，再回来这里 override 该 stage 的 runtime 设定。'
+_TUI_MSG_ZH_CN[per_stage.back]="返回"
+_TUI_MSG_ZH_CN[per_stage.overrides_set]="个 override"
+_TUI_MSG_ZH_CN[per_stage.inherits_all]="(全部继承)"
+_TUI_MSG_ZH_CN[per_stage.one.menu]="选择要编辑的 section，或返回"
+_TUI_MSG_ZH_CN[per_stage.scalar.menu]="选择要编辑的 key，或返回"
+_TUI_MSG_ZH_CN[per_stage.scalar.prompt]=$'Override 值\n  - 空白 = 继承 top-level（清除此 override）\n  - mode keys：auto / force / off (gui, gpu)\n  - network mode：host / bridge / none\n  - ipc：host / shareable / private\n  - privileged：true / false\n  - runtime：auto / nvidia / off'
+_TUI_MSG_ZH_CN[per_stage.list.menu]="编辑 list 项目、切换继承、或返回"
+_TUI_MSG_ZH_CN[per_stage.list.entry_prompt]=$'List 项目值\n  - 空白 = 删除此项目\n  - 格式依 list 不同（mount: host:container[:mode] / port: host:container[/proto] / env: KEY=VALUE）'
+_TUI_MSG_ZH_CN[per_stage.network.ports]="ports list (per-stage)"
+_TUI_MSG_ZH_CN[per_stage.inherit]="(继承 top-level — 清除 override)"
+_TUI_MSG_ZH_CN[per_stage.inherit_flag]="继承 top-level 项目"
 _TUI_MSG_ZH_CN[reset.title]="重置为默认值"
-_TUI_MSG_ZH_CN[reset.confirm]=$'重置所有设定为 template 默认值？\n\n  - 移除 <repo>/setup.conf\n  - 重跑 setup.sh 从 template 重建\n  - 你当前的定制会丢失\n\n无法撤销。'
+_TUI_MSG_ZH_CN[reset.confirm]=$'重置所有设定为 template 默认值？\n\n  - 移除 <repo>/config/docker/setup.conf\n  - 重跑 setup.sh 从 template 重建\n  - 你当前的定制会丢失\n\n无法撤销。'
 _TUI_MSG_ZH_CN[reset.done]="所有设定已重置为默认值。"
 _TUI_MSG_ZH_CN[security.title]="Security"
 _TUI_MSG_ZH_CN[security.menu]="选择：privileged／cap_add／cap_drop／security_opt"
@@ -525,12 +615,42 @@ _TUI_MSG_JA[main.advanced]="詳細"
 _TUI_MSG_JA[main.save]="保存して終了"
 _TUI_MSG_JA[main.security]="privileged／cap_add／security_opt"
 _TUI_MSG_JA[main.additional_contexts]="名前付き build context（build.additional_contexts）"
+_TUI_MSG_JA[main.runtime]="ランタイム（ネットワーク／GPU／表示／環境変数）"
+_TUI_MSG_JA[main.mounts]="マウント（volumes／devices／tmpfs）"
+_TUI_MSG_JA[main.features]="機能（条件付き／上級者向け）"
+_TUI_MSG_JA[runtime.title]="ランタイム"
+_TUI_MSG_JA[runtime.menu]="ランタイムセクションを選択"
+_TUI_MSG_JA[runtime.back]="メインメニューへ戻る"
+_TUI_MSG_JA[mounts.title]="マウント"
+_TUI_MSG_JA[mounts.menu]="マウントセクションを選択"
+_TUI_MSG_JA[mounts.back]="メインメニューへ戻る"
+_TUI_MSG_JA[features.title]="機能"
+_TUI_MSG_JA[features.menu]="条件付き／上級者向け機能"
+_TUI_MSG_JA[features.back]="メインメニューへ戻る"
+_TUI_MSG_JA[features.per_stage_enabled]="Per-stage overrides — 有効（%s ステージ）"
+_TUI_MSG_JA[features.per_stage_hidden]="Per-stage overrides — 非表示（非ベースライン stage なし）"
+_TUI_MSG_JA[features.per_stage_hidden_info]=$'Per-stage overrides (#220)\n\nステータス：非表示\n理由：Dockerfile に非ベースライン stage がありません（sys、devel-base、\n      devel、devel-test、runtime-test はベースラインの予約名です；\n      旧名 base / test も v0.21.x 移行期間中は受け付けます）。\n\n有効化：Dockerfile に `FROM ... AS <stage>` を追加（任意のカスタム名）\n        してからこのメニューに戻ると、項目が自動的に有効になります。'
 _TUI_MSG_JA[advanced.title]="Advanced"
 _TUI_MSG_JA[advanced.menu]="Advanced セクションを選択"
 _TUI_MSG_JA[advanced.back]="メインメニューへ戻る"
 _TUI_MSG_JA[advanced.reset]="デフォルトにリセット"
+_TUI_MSG_JA[advanced.per_stage]="Per-stage overrides (#220)"
+_TUI_MSG_JA[per_stage.title]="Per-stage overrides"
+_TUI_MSG_JA[per_stage.menu]="編集する stage を選択するか、戻る"
+_TUI_MSG_JA[per_stage.empty]=$'Dockerfile に非 baseline の stage がありません。\n\nPer-stage overrides は baseline {sys, devel-base, devel, devel-test,\nruntime-test}（v0.21.x 移行期間中は旧名 {base, test} も受け付け）以外\nの `FROM ... AS <name>` stage に適用されます。先に Dockerfile に\nstage を追加してから、このメニューで runtime 設定を override\nしてください。'
+_TUI_MSG_JA[per_stage.back]="戻る"
+_TUI_MSG_JA[per_stage.overrides_set]="件の override"
+_TUI_MSG_JA[per_stage.inherits_all]="(すべて継承)"
+_TUI_MSG_JA[per_stage.one.menu]="編集する section を選択するか、戻る"
+_TUI_MSG_JA[per_stage.scalar.menu]="編集する key を選択するか、戻る"
+_TUI_MSG_JA[per_stage.scalar.prompt]=$'Override 値\n  - 空白 = top-level を継承（この override をクリア）\n  - mode keys：auto / force / off (gui, gpu)\n  - network mode：host / bridge / none\n  - ipc：host / shareable / private\n  - privileged：true / false\n  - runtime：auto / nvidia / off'
+_TUI_MSG_JA[per_stage.list.menu]="list 項目の編集、継承の切替、または戻る"
+_TUI_MSG_JA[per_stage.list.entry_prompt]=$'List 項目の値\n  - 空白 = この項目を削除\n  - 形式は list ごとに異なります（mount: host:container[:mode] / port: host:container[/proto] / env: KEY=VALUE）'
+_TUI_MSG_JA[per_stage.network.ports]="ports list (per-stage)"
+_TUI_MSG_JA[per_stage.inherit]="(top-level を継承 — override をクリア)"
+_TUI_MSG_JA[per_stage.inherit_flag]="top-level 項目を継承"
 _TUI_MSG_JA[reset.title]="デフォルトにリセット"
-_TUI_MSG_JA[reset.confirm]=$'全ての設定を template のデフォルトにリセット？\n\n  - <repo>/setup.conf を削除\n  - setup.sh を再実行して template から再生成\n  - 現在のカスタマイズは失われます\n\n元に戻せません。'
+_TUI_MSG_JA[reset.confirm]=$'全ての設定を template のデフォルトにリセット？\n\n  - <repo>/config/docker/setup.conf を削除\n  - setup.sh を再実行して template から再生成\n  - 現在のカスタマイズは失われます\n\n元に戻せません。'
 _TUI_MSG_JA[reset.done]="全ての設定がデフォルトにリセットされました。"
 _TUI_MSG_JA[security.title]="Security"
 _TUI_MSG_JA[security.menu]="選択：privileged／cap_add／cap_drop／security_opt"
@@ -1531,6 +1651,337 @@ _edit_section_additional_contexts() {
 
 # ── Main menu ────────────────────────────────────────────────────────────
 
+# ── Per-stage overrides (#220) ───────────────────────────────────────────
+
+# _list_dockerfile_stages_available <out_array_var> [<base_path>]
+#
+# Parses <base_path>/Dockerfile and returns non-baseline stages (the
+# same set _parse_dockerfile_stages emits in setup.sh — duplicated here
+# rather than sourcing setup.sh because setup_tui.sh keeps its
+# dependency surface deliberately small).
+#
+# <base_path> defaults to ${FILE_PATH} (the repo's compose-yaml dir).
+# Test code overrides it to point at a temp Dockerfile, since
+# FILE_PATH is readonly in setup_tui.sh and cannot be reassigned in
+# the same shell.
+_list_dockerfile_stages_available() {
+  local -n _ldsa_out="${1:?}"
+  local _base="${2:-${FILE_PATH}}"
+  _ldsa_out=()
+  local _df="${_base}/Dockerfile"
+  [[ -f "${_df}" ]] || return 0
+  local _line _stage _seen=" "
+  while IFS= read -r _line || [[ -n "${_line}" ]]; do
+    [[ "${_line}" =~ ^FROM[[:space:]]+[^[:space:]#]+[[:space:]]+AS[[:space:]]+([^[:space:]#]+)[[:space:]]*$ ]] || continue
+    _stage="${BASH_REMATCH[1]}"
+    case "${_stage}" in
+      sys|devel-base|devel|devel-test|runtime-test) continue ;;
+      base|test) continue ;;
+    esac
+    case "${_seen}" in
+      *" ${_stage} "*) continue ;;
+    esac
+    _seen+="${_stage} "
+    _ldsa_out+=("${_stage}")
+  done < "${_df}"
+}
+
+# _count_stage_overrides <stage> <out_var>
+#
+# Counts the number of non-empty override entries belonging to the
+# stage's [stage:NAME] section (across both _TUI_OVR_* and
+# _TUI_CURRENT, deduped). Used for the stage-list label.
+_count_stage_overrides() {
+  local _stage="${1}"
+  local -n _cso_out="${2:?}"
+  _cso_out=0
+  local _prefix="stage:${_stage}."
+  local -A _seen=()
+  local i
+  for (( i=0; i<${#_TUI_OVR_KEYS[@]}; i++ )); do
+    if [[ "${_TUI_OVR_KEYS[i]}" == "${_prefix}"* ]]; then
+      [[ -n "${_TUI_OVR_VALUES[i]}" ]] || continue
+      _seen[${_TUI_OVR_KEYS[i]}]=1
+    fi
+  done
+  local _k
+  for _k in "${!_TUI_CURRENT[@]}"; do
+    if [[ "${_k}" == "${_prefix}"* ]]; then
+      [[ -n "${_TUI_CURRENT[${_k}]}" ]] || continue
+      _seen[${_k}]=1
+    fi
+  done
+  _cso_out="${#_seen[@]}"
+}
+
+# _edit_section_per_stage
+#
+# Top-level "Per-stage overrides" entry — shows the stage list with
+# per-stage override-counts; click into one stage opens the section
+# submenu (_edit_per_stage_one).
+_edit_section_per_stage() {
+  while :; do
+    local -a _stages=()
+    _list_dockerfile_stages_available _stages
+    if (( ${#_stages[@]} == 0 )); then
+      _tui_msgbox "$(_tui_msg per_stage.title)" "$(_tui_msg per_stage.empty)"
+      return 0
+    fi
+    local -a _menu_args=()
+    local _stage _count _label
+    for _stage in "${_stages[@]}"; do
+      _count_stage_overrides "${_stage}" _count
+      if (( _count > 0 )); then
+        # shellcheck disable=SC2059  # message source is our own i18n table
+        _label="$(printf '%d %s' "${_count}" "$(_tui_msg per_stage.overrides_set)")"
+      else
+        _label="$(_tui_msg per_stage.inherits_all)"
+      fi
+      _menu_args+=("${_stage}" "${_label}")
+    done
+    _menu_args+=("__back" "$(_tui_msg per_stage.back)")
+
+    local _choice
+    _choice="$(_tui_menu "$(_tui_msg per_stage.title)" \
+      "$(_tui_msg per_stage.menu)" "${_menu_args[@]}")" || return 0
+    case "${_choice}" in
+      __back|"") return 0 ;;
+      *) _edit_per_stage_one "${_choice}" ;;
+    esac
+  done
+}
+
+# _edit_per_stage_one <stage>
+#
+# Submenu for one stage: the 5 sections we expose for per-stage
+# override (gui / deploy / network / volumes / environment).
+_edit_per_stage_one() {
+  local _stage="${1}"
+  while :; do
+    local _choice
+    _choice="$(_tui_menu "stage: ${_stage}" \
+      "$(_tui_msg per_stage.one.menu)" \
+      gui         "$(_tui_msg main.gui)" \
+      deploy      "$(_tui_msg main.deploy)" \
+      network     "$(_tui_msg main.network)" \
+      volumes     "$(_tui_msg main.volumes)" \
+      environment "$(_tui_msg main.environment)" \
+      __back      "$(_tui_msg per_stage.back)")" || return 0
+    case "${_choice}" in
+      gui)         _edit_stage_gui "${_stage}" ;;
+      deploy)      _edit_stage_deploy "${_stage}" ;;
+      network)     _edit_stage_network "${_stage}" ;;
+      volumes)     _edit_stage_volumes "${_stage}" ;;
+      environment) _edit_stage_environment "${_stage}" ;;
+      __back|"")   return 0 ;;
+    esac
+  done
+}
+
+# _edit_stage_scalar <stage> <dotted_key>
+#
+# Generic scalar editor — text input. Empty input clears the override
+# (the stage falls back to inheriting top-level).
+_edit_stage_scalar() {
+  local _stage="${1}" _dotted="${2}"
+  local _nskey="stage:${_stage}.${_dotted}"
+  local _cur _v
+  _cur="$(_override_get "${_nskey}" "")"
+  _v="$(_tui_inputbox "stage:${_stage} / ${_dotted}" \
+    "$(_tui_msg per_stage.scalar.prompt)" "${_cur}")" || return 0
+  if [[ -z "${_v}" ]]; then
+    _mark_removed "${_nskey}"
+  else
+    _override_set "${_nskey}" "${_v}"
+  fi
+}
+
+# _edit_stage_gui <stage>
+#
+# gui.mode override: radio for auto/force/off plus an explicit
+# __inherit option (clears the override so the stage inherits
+# top-level gui resolution).
+_edit_stage_gui() {
+  local _stage="${1}"
+  local _nskey="stage:${_stage}.gui.mode"
+  local _cur _v
+  _cur="$(_override_get "${_nskey}" "")"
+  _v="$(_tui_select "stage:${_stage} / gui" \
+    "$(_tui_msg gui.mode.prompt)" \
+    auto      "$(_tui_msg gui.mode.auto)"      "$([[ "${_cur}" == auto ]]   && echo ON || echo off)" \
+    force     "$(_tui_msg gui.mode.force)"     "$([[ "${_cur}" == force ]]  && echo ON || echo off)" \
+    off       "$(_tui_msg gui.mode.off)"       "$([[ "${_cur}" == off ]]    && echo ON || echo off)" \
+    __inherit "$(_tui_msg per_stage.inherit)"  "$([[ -z "${_cur}" ]]        && echo ON || echo off)")" \
+    || return 0
+  if [[ "${_v}" == "__inherit" || -z "${_v}" ]]; then
+    _mark_removed "${_nskey}"
+  else
+    _override_set "${_nskey}" "${_v}"
+  fi
+}
+
+# _edit_stage_deploy <stage>
+#
+# Deploy section: gpu_mode + gpu_count + gpu_capabilities + runtime.
+# Each currently goes through _edit_stage_scalar (free-form input);
+# v1 ships with that for simplicity. Future polish (#221 menu work)
+# can swap each into a typed editor (radio for gpu_mode, etc.).
+_edit_stage_deploy() {
+  local _stage="${1}"
+  while :; do
+    local _gm _gc _gcaps _rt _ph
+    _gm="$(_override_get "stage:${_stage}.deploy.gpu_mode" "")"
+    _gc="$(_override_get "stage:${_stage}.deploy.gpu_count" "")"
+    _gcaps="$(_override_get "stage:${_stage}.deploy.gpu_capabilities" "")"
+    _rt="$(_override_get "stage:${_stage}.deploy.runtime" "")"
+    _ph="$(_tui_msg per_stage.inherits_all)"
+    local _choice
+    _choice="$(_tui_menu "stage:${_stage} / deploy" \
+      "$(_tui_msg per_stage.scalar.menu)" \
+      gpu_mode         "${_gm:-${_ph}}" \
+      gpu_count        "${_gc:-${_ph}}" \
+      gpu_capabilities "${_gcaps:-${_ph}}" \
+      runtime          "${_rt:-${_ph}}" \
+      __back           "$(_tui_msg per_stage.back)")" || return 0
+    case "${_choice}" in
+      __back|"") return 0 ;;
+      *) _edit_stage_scalar "${_stage}" "deploy.${_choice}" ;;
+    esac
+  done
+}
+
+# _edit_stage_network <stage>
+#
+# Network section: mode / ipc / network_name / privileged + the ports
+# sublist. privileged lives in the [security] section in setup.conf
+# but is bundled here for the user since it's network-adjacent in the
+# top-level menu structure.
+_edit_stage_network() {
+  local _stage="${1}"
+  while :; do
+    local _m _ipc _nn _pri _ph
+    _m="$(_override_get "stage:${_stage}.network.mode" "")"
+    _ipc="$(_override_get "stage:${_stage}.network.ipc" "")"
+    _nn="$(_override_get "stage:${_stage}.network.network_name" "")"
+    _pri="$(_override_get "stage:${_stage}.security.privileged" "")"
+    _ph="$(_tui_msg per_stage.inherits_all)"
+    local _choice
+    _choice="$(_tui_menu "stage:${_stage} / network" \
+      "$(_tui_msg per_stage.scalar.menu)" \
+      mode         "${_m:-${_ph}}" \
+      ipc          "${_ipc:-${_ph}}" \
+      network_name "${_nn:-${_ph}}" \
+      privileged   "${_pri:-${_ph}}" \
+      ports        "$(_tui_msg per_stage.network.ports)" \
+      __back       "$(_tui_msg per_stage.back)")" || return 0
+    case "${_choice}" in
+      __back|"") return 0 ;;
+      mode|ipc|network_name) _edit_stage_scalar "${_stage}" "network.${_choice}" ;;
+      privileged) _edit_stage_scalar "${_stage}" "security.privileged" ;;
+      ports) _edit_stage_list "${_stage}" "network" "port_" "network.port_inherit" ;;
+    esac
+  done
+}
+
+# _edit_stage_volumes <stage>
+#   _edit_stage_environment <stage>
+#
+# Thin wrappers over _edit_stage_list with section-specific args.
+_edit_stage_volumes() {
+  _edit_stage_list "${1}" "volumes" "mount_" "volumes.mount_inherit"
+}
+_edit_stage_environment() {
+  _edit_stage_list "${1}" "environment" "env_" "environment.env_inherit"
+}
+
+# _edit_stage_list <stage> <section> <prefix> <inherit_dotted>
+#
+# Generic list editor for per-stage list fields (volumes.mount_*,
+# network.port_*, environment.env_*). Mirrors the top-level
+# _edit_list_section (numeric-suffix add/edit/remove) plus an inherit
+# toggle row that flips `<list>_inherit` between true (default) and
+# false (replace mode — drop top-level entries entirely).
+#
+# Args:
+#   stage           Stage name (becomes part of the namespace prefix)
+#   section         Top-level section name (volumes / environment / network)
+#   prefix          List item key prefix (mount_ / env_ / port_)
+#   inherit_dotted  Dotted meta-key path inside the stage section
+#                   (e.g. volumes.mount_inherit)
+_edit_stage_list() {
+  local _stage="${1}" _section="${2}" _prefix="${3}" _inherit_dotted="${4}"
+  local _ns="stage:${_stage}.${_section}"
+  while :; do
+    local -a _nums=()
+    local _k _n _x _found
+    for _k in "${!_TUI_CURRENT[@]}"; do
+      if [[ "${_k}" == "${_ns}.${_prefix}"* ]]; then
+        _n="${_k#"${_ns}.${_prefix}"}"
+        [[ "${_n}" =~ ^[0-9]+$ ]] && _nums+=("${_n}")
+      fi
+    done
+    local i
+    for (( i=0; i<${#_TUI_OVR_KEYS[@]}; i++ )); do
+      if [[ "${_TUI_OVR_KEYS[i]}" == "${_ns}.${_prefix}"* ]]; then
+        _n="${_TUI_OVR_KEYS[i]#"${_ns}.${_prefix}"}"
+        if [[ "${_n}" =~ ^[0-9]+$ ]]; then
+          _found=0
+          for _x in "${_nums[@]}"; do [[ "${_x}" == "${_n}" ]] && _found=1 && break; done
+          (( _found )) || _nums+=("${_n}")
+        fi
+      fi
+    done
+    # shellcheck disable=SC2207
+    mapfile -t _nums < <(printf '%s\n' "${_nums[@]}" | sort -n | uniq)
+
+    local -a _menu_args=()
+    for _n in "${_nums[@]}"; do
+      local _cur_v
+      _cur_v="$(_override_get "${_ns}.${_prefix}${_n}" "")"
+      [[ -z "${_cur_v}" ]] && continue
+      _menu_args+=("${_prefix}${_n}" "${_cur_v}")
+    done
+    # Inherit toggle row — display current state in the label.
+    local _inherit_v _inherit_label
+    _inherit_v="$(_override_get "stage:${_stage}.${_inherit_dotted}" "true")"
+    [[ -z "${_inherit_v}" ]] && _inherit_v="true"
+    _inherit_label="$(_tui_msg per_stage.inherit_flag): ${_inherit_v}"
+    _menu_args+=("__inherit" "${_inherit_label}")
+    _menu_args+=("add"       "$(_tui_msg volumes.add)")
+    _menu_args+=("__back"    "$(_tui_msg per_stage.back)")
+
+    local _choice
+    _choice="$(_tui_menu "stage:${_stage} / ${_section}" \
+      "$(_tui_msg per_stage.list.menu)" "${_menu_args[@]}")" || return 0
+    case "${_choice}" in
+      __back|"") return 0 ;;
+      __inherit)
+        # Toggle the inherit flag. true is the default — clearing the
+        # override is equivalent to true. false = explicit replace mode.
+        if [[ "${_inherit_v}" == "false" ]]; then
+          _mark_removed "stage:${_stage}.${_inherit_dotted}"
+        else
+          _override_set "stage:${_stage}.${_inherit_dotted}" "false"
+        fi
+        ;;
+      add)
+        local _next=1 _v
+        while :; do
+          _v="$(_override_get "${_ns}.${_prefix}${_next}" "")"
+          [[ -z "${_v}" ]] && break
+          (( _next++ ))
+        done
+        _edit_list_entry "${_ns}" "${_prefix}" "${_next}" \
+          "$(_tui_msg per_stage.list.entry_prompt)" || true
+        ;;
+      "${_prefix}"*)
+        _edit_list_entry "${_ns}" "${_prefix}" "${_choice#"${_prefix}"}" \
+          "$(_tui_msg per_stage.list.entry_prompt)" || true
+        ;;
+    esac
+  done
+}
+
 _render_main_menu() {
   # Footer button labels are NOT i18n'd — keep a stable English
   # "Enter / Cancel" row across all locales so users never see a mix
@@ -1546,22 +1997,31 @@ _render_main_menu() {
   # screenshots / docs. Standardizing on a synthetic `__save` entry
   # gives identical layout regardless of backend; the small extra
   # navigation step on dialog is acceptable for the consistency win.
+  # Main menu structure (#221):
+  #   image / build           — top-level (frequently tweaked when wiring a repo)
+  #   runtime / mounts        — sub-menu groupers (lifecycle-stage groupings)
+  #   advanced                — power-user sections (security / contexts / per-stage)
+  #   features                — discoverability for conditional / power-user features
+  #   Save & Exit             — synthetic entry, see #178 note above
   while :; do
     local _choice _rc
     _choice="$(_tui_menu "$(_tui_msg title)" "$(_tui_msg main.prompt)" \
-      network     "$(_tui_msg main.network)" \
-      deploy      "$(_tui_msg main.deploy)" \
-      gui         "$(_tui_msg main.gui)" \
-      volumes     "$(_tui_msg main.volumes)" \
-      environment "$(_tui_msg main.environment)" \
-      advanced    "$(_tui_msg main.advanced)" \
-      __save      "$(_tui_msg main.save)")"
+      image     "$(_tui_msg main.image)" \
+      build     "$(_tui_msg main.build)" \
+      runtime   "$(_tui_msg main.runtime)" \
+      mounts    "$(_tui_msg main.mounts)" \
+      advanced  "$(_tui_msg main.advanced)" \
+      features  "$(_tui_msg main.features)" \
+      __save    "$(_tui_msg main.save)")"
     _rc=$?
     case "${_rc}" in
       0)
         case "${_choice}" in
-          network|deploy|gui|volumes|environment) "_edit_section_${_choice}" ;;
+          image|build) "_edit_section_${_choice}" ;;
+          runtime)  _render_runtime_menu ;;
+          mounts)   _render_mounts_menu ;;
           advanced) _render_advanced_menu ;;
+          features) _render_features_menu ;;
           __save)   TUI_OK_LABEL=""; TUI_CANCEL_LABEL=""; return 0 ;;
           "")       TUI_OK_LABEL=""; TUI_CANCEL_LABEL=""; return 1 ;;
         esac
@@ -1571,20 +2031,115 @@ _render_main_menu() {
   done
 }
 
-_render_advanced_menu() {
+_render_runtime_menu() {
+  # Runtime grouper (#221): network / GPU / display / env vars — all
+  # the things that take effect when the container actually runs.
   while :; do
     local _choice
-    _choice="$(_tui_menu "$(_tui_msg advanced.title)" "$(_tui_msg advanced.menu)" \
-      image                "$(_tui_msg main.image)" \
-      build                "$(_tui_msg main.build)" \
-      devices              "$(_tui_msg main.devices)" \
-      tmpfs                "$(_tui_msg main.tmpfs)" \
-      security             "$(_tui_msg main.security)" \
-      additional_contexts  "$(_tui_msg main.additional_contexts)" \
-      reset                "$(_tui_msg advanced.reset)" \
-      __back               "$(_tui_msg advanced.back)")" || break
+    _choice="$(_tui_menu "$(_tui_msg runtime.title)" "$(_tui_msg runtime.menu)" \
+      network     "$(_tui_msg main.network)" \
+      deploy      "$(_tui_msg main.deploy)" \
+      gui         "$(_tui_msg main.gui)" \
+      environment "$(_tui_msg main.environment)" \
+      __back      "$(_tui_msg runtime.back)")" || break
     case "${_choice}" in
-      image|build|devices|tmpfs|security|additional_contexts) "_edit_section_${_choice}" ;;
+      network|deploy|gui|environment) "_edit_section_${_choice}" ;;
+      __back|"") break ;;
+    esac
+  done
+}
+
+_render_mounts_menu() {
+  # Mounts grouper (#221): volumes / devices / tmpfs — host->container
+  # resource bindings.
+  while :; do
+    local _choice
+    _choice="$(_tui_menu "$(_tui_msg mounts.title)" "$(_tui_msg mounts.menu)" \
+      volumes "$(_tui_msg main.volumes)" \
+      devices "$(_tui_msg main.devices)" \
+      tmpfs   "$(_tui_msg main.tmpfs)" \
+      __back  "$(_tui_msg mounts.back)")" || break
+    case "${_choice}" in
+      volumes|devices|tmpfs) "_edit_section_${_choice}" ;;
+      __back|"") break ;;
+    esac
+  done
+}
+
+# _render_features_menu [base_path]
+#
+# Always-visible discoverability surface for conditional / power-user
+# features (#221 acceptance for the third sub-question of the issue).
+# Each feature row shows current status — "enabled (N ...)" when the
+# preconditions are satisfied, "hidden (...)" when not. Clicking a
+# disabled row pops an msgbox explaining how to enable; clicking an
+# enabled row drills into the same editor the conditional Advanced
+# entry uses (per_stage is the only such feature today).
+#
+# The optional base_path arg threads through to the
+# _list_dockerfile_stages_available probe (FILE_PATH is readonly, so
+# tests pass an alternate base_path here to stage a fake Dockerfile).
+# shellcheck disable=SC2120  # production callers pass no args; tests pass base_path
+_render_features_menu() {
+  local _base_path="${1:-}"
+  while :; do
+    local _choice
+    local -a _stages=()
+    if [[ -n "${_base_path}" ]]; then
+      _list_dockerfile_stages_available _stages "${_base_path}"
+    else
+      _list_dockerfile_stages_available _stages
+    fi
+    local _per_stage_label
+    if (( ${#_stages[@]} > 0 )); then
+      # shellcheck disable=SC2059  # format string sourced from our own i18n table
+      printf -v _per_stage_label "$(_tui_msg features.per_stage_enabled)" "${#_stages[@]}"
+    else
+      _per_stage_label="$(_tui_msg features.per_stage_hidden)"
+    fi
+    _choice="$(_tui_menu "$(_tui_msg features.title)" "$(_tui_msg features.menu)" \
+      per_stage "${_per_stage_label}" \
+      __back    "$(_tui_msg features.back)")" || break
+    case "${_choice}" in
+      per_stage)
+        if (( ${#_stages[@]} > 0 )); then
+          _edit_section_per_stage
+        else
+          _tui_msgbox "$(_tui_msg features.title)" \
+            "$(_tui_msg features.per_stage_hidden_info)"
+        fi
+        ;;
+      __back|"") break ;;
+    esac
+  done
+}
+
+_render_advanced_menu() {
+  # Slimmed for #221: image / build promoted to main; devices / tmpfs
+  # moved to Mounts. What's left here is truly advanced — security
+  # capabilities, named build contexts, per-stage overrides (still
+  # conditional so 17 baseline-only repos see no noise here; Features
+  # menu surfaces it for everyone), and Reset.
+  while :; do
+    local _choice
+    local -a _stages_check=()
+    _list_dockerfile_stages_available _stages_check
+    local -a _menu_args=(
+      security             "$(_tui_msg main.security)"
+      additional_contexts  "$(_tui_msg main.additional_contexts)"
+    )
+    if (( ${#_stages_check[@]} > 0 )); then
+      _menu_args+=(per_stage "$(_tui_msg advanced.per_stage)")
+    fi
+    _menu_args+=(
+      reset                "$(_tui_msg advanced.reset)"
+      __back               "$(_tui_msg advanced.back)"
+    )
+    _choice="$(_tui_menu "$(_tui_msg advanced.title)" "$(_tui_msg advanced.menu)" \
+      "${_menu_args[@]}")" || break
+    case "${_choice}" in
+      security|additional_contexts) "_edit_section_${_choice}" ;;
+      per_stage) _edit_section_per_stage ;;
       reset)    _do_reset ;;
       __back|"") break ;;
     esac
@@ -1601,14 +2156,16 @@ _do_reset() {
   _tui_yesno "$(_tui_msg reset.title)" "$(_tui_msg reset.confirm)" || return 0
   # Reset deletes the per-repo override (setup.conf). The next apply
   # re-bootstraps it from the template baseline + detected workspace.
-  rm -f "${FILE_PATH}/setup.conf"
-  "${_TUI_SCRIPT_DIR}/setup.sh" apply --base-path "${FILE_PATH}" --lang "${_LANG}" \
+  rm -f "${FILE_PATH}/config/docker/setup.conf"
+  # --quiet so apply's confirmation lines don't double-print after the
+  # TUI's own `[tui] saved` line (#285).
+  "${_TUI_SCRIPT_DIR}/setup.sh" apply --quiet --base-path "${FILE_PATH}" --lang "${_LANG}" \
     >/dev/null 2>&1 || true
   _TUI_OVR_KEYS=()
   _TUI_OVR_VALUES=()
   _TUI_REMOVED=()
   _TUI_CURRENT=()
-  _load_current "${FILE_PATH}/setup.conf" "${_TUI_TPL_DIR}/setup.conf"
+  _load_current "${FILE_PATH}/config/docker/setup.conf" "${_TUI_TPL_DIR}/config/docker/setup.conf"
   _tui_msgbox "$(_tui_msg reset.title)" "$(_tui_msg reset.done)"
 }
 
@@ -1656,7 +2213,9 @@ _commit_and_setup() {
   _saved_fmt="$(_tui_msg saved)"
   # shellcheck disable=SC2059
   printf "[tui] ${_saved_fmt}\n" "${_repo_conf}"
-  "${_TUI_SCRIPT_DIR}/setup.sh" apply --base-path "${FILE_PATH}" --lang "${_LANG}"
+  # --quiet so apply's confirmation lines don't double-print after the
+  # TUI's own `[tui] saved` line (#285).
+  "${_TUI_SCRIPT_DIR}/setup.sh" apply --quiet --base-path "${FILE_PATH}" --lang "${_LANG}"
 }
 
 # ── main ─────────────────────────────────────────────────────────────────
@@ -1721,13 +2280,15 @@ main() {
   # TUI's save target is the per-repo override (setup.conf). Loading
   # reads it on top of the template baseline so existing overrides
   # surface as the menu's initial values; new edits land in setup.conf.
-  local _repo_conf="${FILE_PATH}/setup.conf"
-  local _tpl_conf="${_TUI_TPL_DIR}/setup.conf"
+  local _repo_conf="${FILE_PATH}/config/docker/setup.conf"
+  local _tpl_conf="${_TUI_TPL_DIR}/config/docker/setup.conf"
   # First-run bootstrap: when no per-repo setup.conf exists yet, run
   # setup.sh apply so mount_1 detection seeds the file before the TUI
   # opens its menus.
   if [[ ! -f "${_repo_conf}" ]]; then
-    "${_TUI_SCRIPT_DIR}/setup.sh" apply --base-path "${FILE_PATH}" --lang "${_LANG}" \
+    # --quiet so apply's confirmation lines don't double-print after the
+  # TUI's own `[tui] saved` line (#285).
+  "${_TUI_SCRIPT_DIR}/setup.sh" apply --quiet --base-path "${FILE_PATH}" --lang "${_LANG}" \
       >/dev/null 2>&1 || true
   fi
   _load_current "${_repo_conf}" "${_tpl_conf}"

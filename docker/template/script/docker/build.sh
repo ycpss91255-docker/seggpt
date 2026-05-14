@@ -3,56 +3,112 @@
 
 set -euo pipefail
 
+# Default FILE_PATH = the directory the wrapper symlink lives in (i.e.
+# the repo root in normal usage). `-C <dir>` / `--chdir <dir>` overrides
+# it so the wrapper operates on a different repo without changing the
+# caller's cwd. Critical for Claude Code's sandbox `excludedCommands`
+# matching: top-level command stays `./build.sh ...` rather than
+# `(cd <dir> && ...)` or `bash -c "cd <dir> && ..."`, neither of which
+# the bash AST parser unwraps into the `./build.sh *` prefix
+# (refs docker_harness#53). The pre-pass runs before _lib.sh is sourced
+# so all path-dependent operations (including the _lib.sh lookup) honor
+# the override.
 FILE_PATH="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+_chdir_i=1
+while (( _chdir_i <= $# )); do
+  case "${!_chdir_i}" in
+    -C|--chdir)
+      _chdir_next=$((_chdir_i + 1))
+      if (( _chdir_next > $# )) || [[ -z "${!_chdir_next:-}" ]]; then
+        printf '[build] ERROR: -C/--chdir requires a value\n' >&2
+        exit 2
+      fi
+      _chdir_arg="${!_chdir_next}"
+      if [[ ! -d "${_chdir_arg}" ]]; then
+        printf '[build] ERROR: -C target is not a directory: %s\n' "${_chdir_arg}" >&2
+        exit 2
+      fi
+      FILE_PATH="$(cd -- "${_chdir_arg}" && pwd -P)"
+      _chdir_i=$((_chdir_next + 1))
+      ;;
+    *)
+      _chdir_i=$((_chdir_i + 1))
+      ;;
+  esac
+done
+unset _chdir_i _chdir_next _chdir_arg
 readonly FILE_PATH
-# _lib.sh lives at template/script/docker/_lib.sh in normal consumer
+# _lib.sh lives at .base/script/docker/_lib.sh in normal consumer
 # repos, OR alongside build.sh when the Dockerfile `test` stage COPYs
 # scripts + helpers into /lint/. Issue #104 deduplicated the previously
 # inlined fallback `_detect_lang`; we now always have i18n.sh via
 # _lib.sh's sibling load.
-if [[ -f "${FILE_PATH}/template/script/docker/_lib.sh" ]]; then
+if [[ -f "${FILE_PATH}/.base/script/docker/_lib.sh" ]]; then
   # shellcheck disable=SC1091
-  source "${FILE_PATH}/template/script/docker/_lib.sh"
+  source "${FILE_PATH}/.base/script/docker/_lib.sh"
 elif [[ -f "${FILE_PATH}/_lib.sh" ]]; then
   # shellcheck disable=SC1091
   source "${FILE_PATH}/_lib.sh"
 else
   printf "[build] ERROR: cannot find _lib.sh — expected one of:\n" >&2
-  printf "  %s\n" "${FILE_PATH}/template/script/docker/_lib.sh" >&2
+  printf "  %s\n" "${FILE_PATH}/.base/script/docker/_lib.sh" >&2
   printf "  %s\n" "${FILE_PATH}/_lib.sh" >&2
   exit 1
 fi
 
-_msg() {
-  local _key="${1:?}"
-  case "${_LANG}:${_key}" in
-    zh-TW:bootstrap_info)  echo "[build] 資訊：首次執行 — 初始化中..." ;;
-    zh-CN:bootstrap_info)  echo "[build] 信息：首次运行 — 初始化中..." ;;
-    ja:bootstrap_info)     echo "[build] 情報: 初回実行 — ブートストラップ中..." ;;
-    *:bootstrap_info)      echo "[build] INFO: First run — bootstrapping..." ;;
-    zh-TW:drift_regen)     echo "[build] 重新產生 .env / compose.yaml（setup.conf 已變更）" ;;
-    zh-CN:drift_regen)     echo "[build] 重新生成 .env / compose.yaml（setup.conf 已变更）" ;;
-    ja:drift_regen)        echo "[build] .env / compose.yaml を再生成中（setup.conf が変更されました）" ;;
-    *:drift_regen)         echo "[build] regenerating .env / compose.yaml (setup.conf drifted)" ;;
-    zh-TW:err_no_env)      echo "[build] 錯誤：setup 未產生 .env。" ;;
-    zh-CN:err_no_env)      echo "[build] 错误：setup 未生成 .env。" ;;
-    ja:err_no_env)         echo "[build] エラー: setup が .env を生成しませんでした。" ;;
-    *:err_no_env)          echo "[build] ERROR: setup did not produce .env." ;;
-    zh-TW:err_rerun_setup) echo "[build] 請改以 './build.sh --setup' 重新執行以開啟編輯器。" ;;
-    zh-CN:err_rerun_setup) echo "[build] 请改以 './build.sh --setup' 重新运行以打开编辑器。" ;;
-    ja:err_rerun_setup)    echo "[build] './build.sh --setup' で再実行してエディタを開いてください。" ;;
-    *:err_rerun_setup)     echo "[build] Re-run with './build.sh --setup' to open the editor." ;;
+# i18n message tables — split by semantic category (#278 PR-2).
+# Each _msg_<category> returns plain i18n body only; tag + LEVEL keyword
+# are added by the _log_* caller (English-only; level keyword no longer
+# translated — see #283).
+_msg_bootstrap() {
+  case "${_LANG}:${1:?}" in
+    zh-TW:info)  echo "首次執行 — 初始化中..." ;;
+    zh-CN:info)  echo "首次运行 — 初始化中..." ;;
+    ja:info)     echo "初回実行 — ブートストラップ中..." ;;
+    *:info)      echo "First run — bootstrapping..." ;;
   esac
+}
+
+_msg_drift() {
+  case "${_LANG}:${1:?}" in
+    zh-TW:regen)  echo "重新產生 .env / compose.yaml（setup.conf 已變更）" ;;
+    zh-CN:regen)  echo "重新生成 .env / compose.yaml（setup.conf 已变更）" ;;
+    ja:regen)     echo ".env / compose.yaml を再生成中（setup.conf が変更されました）" ;;
+    *:regen)      echo "regenerating .env / compose.yaml (setup.conf drifted)" ;;
+  esac
+}
+
+_msg_errors() {
+  case "${_LANG}:${1:?}" in
+    zh-TW:no_env)       echo "setup 未產生 .env。" ;;
+    zh-CN:no_env)       echo "setup 未生成 .env。" ;;
+    ja:no_env)          echo "setup が .env を生成しませんでした。" ;;
+    *:no_env)           echo "setup did not produce .env." ;;
+    zh-TW:rerun_setup)  echo "請改以 './build.sh --setup' 重新執行以開啟編輯器。" ;;
+    zh-CN:rerun_setup)  echo "请改以 './build.sh --setup' 重新运行以打开编辑器。" ;;
+    ja:rerun_setup)     echo "'./build.sh --setup' で再実行してエディタを開いてください。" ;;
+    *:rerun_setup)      echo "Re-run with './build.sh --setup' to open the editor." ;;
+  esac
+}
+
+# Dispatcher — keeps a single _msg call site shape across the script.
+_msg() {
+  local _category="${1:?_msg requires category}"
+  local _key="${2:?_msg requires key}"
+  "_msg_${_category}" "${_key}"
 }
 
 usage() {
   case "${_LANG}" in
     zh-TW)
       cat >&2 <<'EOF'
-用法: ./build.sh [-h] [-s|--setup] [--reset-conf] [-y|--yes] [--no-cache] [--clean-tools] [--dry-run] [--lang <en|zh-TW|zh-CN|ja>] [TARGET]
+用法: ./build.sh [-h] [-C|--chdir DIR] [-s|--setup] [--reset-conf] [-y|--yes] [--no-cache] [--clean-tools] [--dry-run] [-v|--verbose] [-vv|--very-verbose] [--lang <en|zh-TW|zh-CN|ja>] [-t|--target TARGET] [TARGET]
 
 選項:
   -h, --help     顯示此說明
+  -C, --chdir DIR
+                 對 DIR 下的 repo 執行（不改變呼叫者 cwd），類似 git -C / make -C。
+                 須在其他選項與 TARGET 之前指定。
   -s, --setup    強制重跑 setup.sh 重新生成 .env + compose.yaml
                  （預設：.env 不存在時自動 bootstrap；存在時僅印 drift warning）
   --reset-conf   用 template 預設值覆蓋 setup.conf（先備份到 setup.conf.bak
@@ -61,7 +117,15 @@ usage() {
   --no-cache     強制不使用 cache 重建
   --clean-tools  build 結束後移除 test-tools:local image（預設保留以加速下次 build）
   --dry-run      只印出將執行的 docker 指令，不實際執行
+  -v, --verbose  詳細 docker 輸出（BUILDKIT_PROGRESS=plain）。build 卡住時用 —
+                 即時顯示每個 RUN 步驟的 stdout/stderr，不再收斂成單行進度條。
+  -vv, --very-verbose
+                 -v 再加 wrapper 本身的 bash trace（set -x），用於除錯 wrapper
+                 邏輯（少用；通常 -v 就夠了）。
   --lang LANG    設定訊息語言（預設: en）
+  -t, --target TARGET
+                 指定建置目標（等同於位置參數 [TARGET]，與 run.sh -t 對齊）。
+                 兩種寫法同時存在時最後一個生效。
 
 目標:
   devel    開發環境（預設）
@@ -71,10 +135,13 @@ EOF
       ;;
     zh-CN)
       cat >&2 <<'EOF'
-用法: ./build.sh [-h] [-s|--setup] [--reset-conf] [-y|--yes] [--no-cache] [--clean-tools] [--dry-run] [--lang <en|zh-TW|zh-CN|ja>] [TARGET]
+用法: ./build.sh [-h] [-C|--chdir DIR] [-s|--setup] [--reset-conf] [-y|--yes] [--no-cache] [--clean-tools] [--dry-run] [-v|--verbose] [-vv|--very-verbose] [--lang <en|zh-TW|zh-CN|ja>] [-t|--target TARGET] [TARGET]
 
 选项:
   -h, --help     显示此说明
+  -C, --chdir DIR
+                 对 DIR 下的 repo 执行（不改变调用者 cwd），类似 git -C / make -C。
+                 须在其他选项与 TARGET 之前指定。
   -s, --setup    强制重跑 setup.sh 重新生成 .env + compose.yaml
                  （默认：.env 不存在时自动 bootstrap；存在时仅打印 drift warning）
   --reset-conf   用 template 默认值覆盖 setup.conf（先备份到 setup.conf.bak
@@ -83,7 +150,15 @@ EOF
   --no-cache     强制不使用 cache 重建
   --clean-tools  build 结束后移除 test-tools:local image（默认保留以加速下次 build）
   --dry-run      只打印将执行的 docker 命令，不实际执行
+  -v, --verbose  详细 docker 输出（BUILDKIT_PROGRESS=plain）。build 卡住时用 —
+                 实时显示每个 RUN 步骤的 stdout/stderr，不再收敛成单行进度条。
+  -vv, --very-verbose
+                 -v 再加 wrapper 本身的 bash trace（set -x），用于调试 wrapper
+                 逻辑（少用；通常 -v 就够了）。
   --lang LANG    设置消息语言（默认: en）
+  -t, --target TARGET
+                 指定构建目标（等同于位置参数 [TARGET]，与 run.sh -t 对齐）。
+                 两种写法同时存在时最后一个生效。
 
 目标:
   devel    开发环境（默认）
@@ -93,10 +168,13 @@ EOF
       ;;
     ja)
       cat >&2 <<'EOF'
-使用法: ./build.sh [-h] [-s|--setup] [--reset-conf] [-y|--yes] [--no-cache] [--clean-tools] [--dry-run] [--lang <en|zh-TW|zh-CN|ja>] [TARGET]
+使用法: ./build.sh [-h] [-C|--chdir DIR] [-s|--setup] [--reset-conf] [-y|--yes] [--no-cache] [--clean-tools] [--dry-run] [-v|--verbose] [-vv|--very-verbose] [--lang <en|zh-TW|zh-CN|ja>] [-t|--target TARGET] [TARGET]
 
 オプション:
   -h, --help     このヘルプを表示
+  -C, --chdir DIR
+                 DIR 配下の repo に対して実行（呼び出し側の cwd は変えない）。
+                 git -C / make -C と同様。他のオプションや TARGET より前に指定。
   -s, --setup    setup.sh を強制実行して .env + compose.yaml を再生成
                  （デフォルト：.env が無ければ自動 bootstrap、あれば drift warning のみ）
   --reset-conf   setup.conf をテンプレのデフォルトで上書き（setup.conf.bak
@@ -106,7 +184,16 @@ EOF
   --no-cache     キャッシュを使わず強制リビルド
   --clean-tools  build 終了後に test-tools:local image を削除（デフォルトは保持）
   --dry-run      実行される docker コマンドを表示するのみ（実行はしない）
+  -v, --verbose  docker の詳細出力（BUILDKIT_PROGRESS=plain）。build がハング
+                 した時に使用 — 各 RUN ステップの stdout/stderr をリアルタイム
+                 表示し、単一行プログレスバーに畳まれません。
+  -vv, --very-verbose
+                 -v に加え wrapper 自体の bash trace（set -x）。wrapper ロジック
+                 のデバッグ用（稀；通常は -v で十分）。
   --lang LANG    メッセージ言語を設定（デフォルト: en）
+  -t, --target TARGET
+                 ビルドターゲットを指定（位置引数 [TARGET] と同義、run.sh -t と整合）。
+                 両方の形式が指定された場合は最後に指定したものが有効。
 
 ターゲット:
   devel    開発環境（デフォルト）
@@ -116,10 +203,14 @@ EOF
       ;;
     *)
       cat >&2 <<'EOF'
-Usage: ./build.sh [-h] [-s|--setup] [--reset-conf] [-y|--yes] [--no-cache] [--clean-tools] [--dry-run] [--lang <en|zh-TW|zh-CN|ja>] [TARGET]
+Usage: ./build.sh [-h] [-C|--chdir DIR] [-s|--setup] [--reset-conf] [-y|--yes] [--no-cache] [--clean-tools] [--dry-run] [-v|--verbose] [-vv|--very-verbose] [--lang <en|zh-TW|zh-CN|ja>] [-t|--target TARGET] [TARGET]
 
 Options:
   -h, --help     Show this help
+  -C, --chdir DIR
+                 Operate on the repo at DIR without changing the caller's cwd.
+                 Mirrors git -C / make -C. Must come before other options and
+                 the TARGET.
   -s, --setup    Force rerun setup.sh to regenerate .env + compose.yaml
                  (default: auto-bootstrap if .env missing; warn on drift if present)
   --reset-conf   Overwrite setup.conf with template defaults (backs up the
@@ -131,7 +222,18 @@ Options:
   --no-cache     Force rebuild without cache
   --clean-tools  Remove test-tools:local image after build (default: keep for faster next build)
   --dry-run      Print the docker commands that would run, but do not execute
+  -v, --verbose  Verbose docker output (BUILDKIT_PROGRESS=plain). Use when a
+                 build appears hung — surfaces every RUN step's real-time
+                 stdout/stderr instead of the collapsed single-line progress
+                 UI.
+  -vv, --very-verbose
+                 -v plus bash trace (set -x) on the wrapper itself. For
+                 debugging the wrapper's own logic (rare; -v is usually
+                 enough).
   --lang LANG    Set message language (default: en)
+  -t, --target TARGET
+                 Build target (alias for the positional [TARGET], mirrors
+                 run.sh -t). When both forms are given, last wins.
 
 Targets:
   devel    Development environment (default)
@@ -144,6 +246,23 @@ EOF
 }
 
 main() {
+  # Pre-pass: scan for --lang so usage() (which exits via -h/--help)
+  # runs in the requested locale even when --help is the first arg.
+  # Issue #222 — without this, `build.sh --help --lang zh-TW` falls
+  # through usage() before the main loop reaches --lang and prints
+  # the default-locale usage. The main parse loop below stays
+  # unchanged so --lang's other side-effects (validation, error on
+  # missing value) still run on the canonical path.
+  local _i
+  for (( _i=1; _i<=$#; _i++ )); do
+    if [[ "${!_i}" == "--lang" ]]; then
+      local _next=$((_i+1))
+      _LANG="${!_next:-}"
+      _sanitize_lang _LANG "build"
+      break
+    fi
+  done
+
   local RUN_SETUP=false
   local RESET_CONF=false
   local ASSUME_YES=false
@@ -156,6 +275,13 @@ main() {
     case "$1" in
       -h|--help)
         usage
+        ;;
+      -C|--chdir)
+        # Already consumed by the file-scope pre-pass that overrides
+        # FILE_PATH; skip flag + value here. The pre-pass already
+        # validated DIR exists and "-C" has a value, so we can shift
+        # blindly.
+        shift 2
         ;;
       -s|--setup)
         RUN_SETUP=true
@@ -181,9 +307,33 @@ main() {
         DRY_RUN=true
         shift
         ;;
+      -v|--verbose)
+        # Surface every RUN step's real-time stdout/stderr in docker
+        # build, instead of the collapsed BuildKit progress UI.
+        # https://docs.docker.com/build/building/variables/#progress
+        # Use when a build appears hung to distinguish "still doing
+        # work" from "waiting on network / something else". Closes #311.
+        export BUILDKIT_PROGRESS=plain
+        shift
+        ;;
+      -vv|--very-verbose)
+        # -v plus bash trace on the wrapper itself. For debugging the
+        # wrapper's own option parsing / branching (rare; -v is enough
+        # for diagnosing a hung docker build).
+        export BUILDKIT_PROGRESS=plain
+        set -x
+        shift
+        ;;
       --lang)
         _LANG="${2:?"--lang requires a value (en|zh-TW|zh-CN|ja)"}"
         _sanitize_lang _LANG "build"
+        shift 2
+        ;;
+      -t|--target)
+        # Alias for the positional [TARGET], matching run.sh's -t.
+        # When both forms are passed, last wins — same semantics as
+        # repeating either form alone. Closes #280.
+        TARGET="${2:?"-t/--target requires a value (e.g. devel, test, runtime)"}"
         shift 2
         ;;
       *)
@@ -201,7 +351,7 @@ main() {
   # subsequent setup.sh invocation regenerates .env + compose.yaml from
   # the fresh conf.
   if [[ "${RESET_CONF}" == true ]]; then
-    local _conf="${FILE_PATH}/setup.conf"
+    local _conf="${FILE_PATH}/config/docker/setup.conf"
     local _env="${FILE_PATH}/.env"
     if [[ -f "${_conf}" || -f "${_env}" ]]; then
       if [[ "${ASSUME_YES}" != true && "${DRY_RUN}" != true ]]; then
@@ -218,15 +368,15 @@ main() {
       fi
     fi
     if [[ "${DRY_RUN}" == true ]]; then
-      printf "[dry-run] %s/template/init.sh --gen-conf --force\n" "${FILE_PATH}"
+      printf "[dry-run] %s/.base/init.sh --gen-conf --force\n" "${FILE_PATH}"
     else
-      bash "${FILE_PATH}/template/init.sh" --gen-conf --force
+      bash "${FILE_PATH}/.base/init.sh" --gen-conf --force
     fi
     # Force a fresh setup.sh run so .env + compose.yaml follow the new conf.
     RUN_SETUP=true
   fi
 
-  local _setup="${FILE_PATH}/template/script/docker/setup.sh"
+  local _setup="${FILE_PATH}/.base/script/docker/setup.sh"
   local _tui="${FILE_PATH}/setup_tui.sh"
 
   # _run_interactive: prefer setup_tui.sh when an interactive TTY is
@@ -254,9 +404,9 @@ main() {
   if [[ "${RUN_SETUP}" == true ]]; then
     _run_interactive
   elif [[ ! -f "${FILE_PATH}/.env" ]] \
-      || [[ ! -f "${FILE_PATH}/setup.conf" ]] \
+      || [[ ! -f "${FILE_PATH}/config/docker/setup.conf" ]] \
       || [[ ! -f "${FILE_PATH}/compose.yaml" ]]; then
-    printf "%s\n" "$(_msg bootstrap_info)"
+    _log_info build "$(_msg bootstrap info)"
     "${_setup}" apply --base-path "${FILE_PATH}" --lang "${_LANG}"
   else
     # Drift-check path. When setup.conf / GPU / GUI / USER_UID changed
@@ -272,7 +422,7 @@ main() {
     # build.sh's _msg() and silently blank out drift_regen / err_no_env
     # status lines.
     if ! "${_setup}" check-drift --base-path "${FILE_PATH}" --lang "${_LANG}"; then
-      printf "%s\n" "$(_msg drift_regen)"
+      _log_info build "$(_msg drift regen)"
       "${_setup}" apply --base-path "${FILE_PATH}" --lang "${_LANG}"
     fi
   fi
@@ -281,8 +431,8 @@ main() {
   # (user cancelled an interactive TUI, setup.sh crashed, ...), surface
   # a useful error instead of letting _load_env fail on a missing file.
   if [[ ! -f "${FILE_PATH}/.env" ]]; then
-    printf "%s\n" "$(_msg err_no_env)" >&2
-    printf "%s\n" "$(_msg err_rerun_setup)" >&2
+    _log_err  build "$(_msg errors no_env)"
+    _log_info build "$(_msg errors rerun_setup)"
     exit 1
   fi
 
@@ -297,7 +447,7 @@ main() {
   [[ "${QUIET:-0}" != "1" ]] && _print_config_summary build
 
   # Build test-tools image if Dockerfile exists
-  local _tools_dockerfile="${FILE_PATH}/template/dockerfile/Dockerfile.test-tools"
+  local _tools_dockerfile="${FILE_PATH}/.base/dockerfile/Dockerfile.test-tools"
   local _tools_args=()
   [[ "${NO_CACHE}" == true ]] && _tools_args+=(--no-cache)
   # Forward user's TARGETARCH override when set. Empty = leave unset so

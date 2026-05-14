@@ -9,7 +9,27 @@ on:
   workflow_dispatch:
 
 jobs:
+  actionlint:
+    # Catch GHA workflow-validator semantic regressions (the
+    # class behind the v0.26.0-rc1 wedge, #297) before the
+    # bats / docker matrix burns CI minutes. Runs first; the
+    # other jobs gate on it. Refs #305.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Run actionlint via Docker
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/repo:ro" \
+            -w /repo \
+            rhysd/actionlint:1.7.7 \
+            -color
+
   test:
+    needs: actionlint
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -40,6 +60,7 @@ jobs:
 
   integration-e2e:
     name: Integration E2E (init.sh → build → run → exec → stop)
+    needs: actionlint
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -56,18 +77,18 @@ jobs:
           TMP_ROOT="$(mktemp -d)"
           REPO_NAME="e2e_test"
           REPO_DIR="${TMP_ROOT}/${REPO_NAME}"
-          mkdir -p "${REPO_DIR}/template"
+          mkdir -p "${REPO_DIR}/.base"
 
           # Mirror current template into the synthetic repo
-          cp -a "${GITHUB_WORKSPACE}/." "${REPO_DIR}/template/"
+          cp -a "${GITHUB_WORKSPACE}/." "${REPO_DIR}/.base/"
 
           cd "${REPO_DIR}"
-          bash template/init.sh
+          bash .base/init.sh
 
           # Sanity: verify symlinks resolve and core files exist
           test -L build.sh && test -L run.sh && test -L exec.sh && test -L stop.sh
           test -L setup_tui.sh
-          test -f Dockerfile && test -f compose.yaml && test -f setup.conf
+          test -f Dockerfile && test -f compose.yaml && test -f config/docker/setup.conf
 
           echo "REPO_DIR=${REPO_DIR}" >> "${GITHUB_ENV}"
 
@@ -100,8 +121,28 @@ jobs:
             exit 1
           fi
 
+  behavioural:
+    name: Behavioural Test (runtime-test smoke gate, #249)
+    needs: actionlint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # Build test-tools:local from THIS PR's Dockerfile so the docker
+      # CLI added in #249 actually lands in the image the behavioural
+      # specs consume. Skipping this would pull the previously
+      # published `:latest` (no docker CLI) and every test would skip.
+      - name: Build test-tools:local
+        run: docker build -t test-tools:local -f dockerfile/Dockerfile.test-tools .
+
+      - name: Run behavioural specs (docker.sock-mounted ci-behavioural service)
+        env:
+          TEST_TOOLS_IMAGE: test-tools:local
+        run: docker compose run --rm ci-behavioural
+
   release:
-    needs: [test, integration-e2e]
+    needs: [test, integration-e2e, behavioural]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:

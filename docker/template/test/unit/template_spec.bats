@@ -56,15 +56,15 @@ setup() {
   assert_success
 }
 
-@test "Makefile upgrade target uses ./template/upgrade.sh (not ./template/script/upgrade.sh)" {
+@test "Makefile upgrade target uses ./.base/upgrade.sh (not ./.base/script/upgrade.sh)" {
   # Regression: the Makefile symlinked into every downstream repo has
-  # called `./template/script/upgrade.sh` since v0.10.x, but upgrade.sh
-  # actually lives at template root (`./template/upgrade.sh`). The
+  # called `./.base/script/upgrade.sh` since v0.10.x, but upgrade.sh
+  # actually lives at template root (`./.base/upgrade.sh`). The
   # broken target produced "No such file or directory" on `make upgrade`
   # / `make upgrade-check` for fresh consumer repos.
-  run grep -E '^[[:space:]]+\./template/upgrade\.sh' /source/script/docker/Makefile
+  run grep -E '^[[:space:]]+\./.base/upgrade\.sh' /source/script/docker/Makefile
   assert_success
-  refute_output --partial "./template/script/upgrade.sh"
+  refute_output --partial "./.base/script/upgrade.sh"
 }
 
 @test "Makefile.ci exists (template CI)" {
@@ -101,7 +101,7 @@ setup() {
   # treats exit 1 as success — the check itself succeeded, the user-
   # facing message already conveys the result. Exit codes ≥2 (genuine
   # failures) still propagate.
-  run grep -E '\./template/upgrade\.sh --check \|\| \[ \$\$\? -eq 1 \]' \
+  run grep -E '\./.base/upgrade\.sh --check \|\| \[ \$\$\? -eq 1 \]' \
       /source/script/docker/Makefile
   assert_success
 }
@@ -152,16 +152,16 @@ setup() {
 }
 
 # ════════════════════════════════════════════════════════════════════
-# Path reference: scripts call template/script/docker/setup.sh
+# Path reference: scripts call .base/script/docker/setup.sh
 # ════════════════════════════════════════════════════════════════════
 
-@test "build.sh references template/script/docker/setup.sh" {
-  run grep "template/script/docker/setup.sh" /source/script/docker/build.sh
+@test "build.sh references .base/script/docker/setup.sh" {
+  run grep ".base/script/docker/setup.sh" /source/script/docker/build.sh
   assert_success
 }
 
-@test "run.sh references template/script/docker/setup.sh" {
-  run grep "template/script/docker/setup.sh" /source/script/docker/run.sh
+@test "run.sh references .base/script/docker/setup.sh" {
+  run grep ".base/script/docker/setup.sh" /source/script/docker/run.sh
   assert_success
 }
 
@@ -220,14 +220,15 @@ setup() {
 # Docker compose project name (-p)
 # ════════════════════════════════════════════════════════════════════
 
-@test "_lib.sh derives PROJECT_NAME from DOCKER_HUB_USER and IMAGE_NAME" {
-  # Project name derivation lives in _lib.sh and is shared by all callers.
-  run grep -E 'PROJECT_NAME=.*DOCKER_HUB_USER.*IMAGE_NAME' /source/script/docker/_lib.sh
+@test "lib/compose.sh derives PROJECT_NAME from DOCKER_HUB_USER and IMAGE_NAME" {
+  # Project name derivation lives in lib/compose.sh (#284 split out of _lib.sh)
+  # and is shared by all callers via the _lib.sh umbrella.
+  run grep -E 'PROJECT_NAME=.*DOCKER_HUB_USER.*IMAGE_NAME' /source/script/docker/lib/compose.sh
   assert_success
 }
 
-@test "_lib.sh _compose_project wraps -p with PROJECT_NAME" {
-  run grep -E '\-p .*PROJECT_NAME' /source/script/docker/_lib.sh
+@test "lib/compose.sh _compose_project wraps -p with PROJECT_NAME" {
+  run grep -E '\-p .*PROJECT_NAME' /source/script/docker/lib/compose.sh
   assert_success
 }
 
@@ -261,18 +262,18 @@ setup() {
   assert_success
 }
 
-@test "_lib.sh defines _load_env helper" {
-  run grep -E '^_load_env\(\)' /source/script/docker/_lib.sh
+@test "lib/env.sh defines _load_env helper" {
+  run grep -E '^_load_env\(\)' /source/script/docker/lib/env.sh
   assert_success
 }
 
-@test "_lib.sh defines _compute_project_name helper" {
-  run grep -E '^_compute_project_name\(\)' /source/script/docker/_lib.sh
+@test "lib/compose.sh defines _compute_project_name helper" {
+  run grep -E '^_compute_project_name\(\)' /source/script/docker/lib/compose.sh
   assert_success
 }
 
-@test "_lib.sh defines _compose wrapper" {
-  run grep -E '^_compose\(\)' /source/script/docker/_lib.sh
+@test "lib/compose.sh defines _compose wrapper" {
+  run grep -E '^_compose\(\)' /source/script/docker/lib/compose.sh
   assert_success
 }
 
@@ -466,9 +467,11 @@ setup() {
 DOCKER_HUB_USER=alice
 IMAGE_NAME=missing-image-$$
 EOF
-  mkdir -p "${_tmp}/template/script/docker"
-  cp /source/script/docker/_lib.sh "${_tmp}/template/script/docker/_lib.sh"
-  cp /source/script/docker/i18n.sh "${_tmp}/template/script/docker/i18n.sh" 2>/dev/null || true
+  mkdir -p "${_tmp}/.base/script/docker/lib"
+  cp /source/script/docker/_lib.sh "${_tmp}/.base/script/docker/_lib.sh"
+  cp /source/script/docker/i18n.sh "${_tmp}/.base/script/docker/i18n.sh" 2>/dev/null || true
+  # _lib.sh post-#284 is an umbrella that sources lib/*.sh sub-libs.
+  cp /source/script/docker/lib/*.sh "${_tmp}/.base/script/docker/lib/"
   cp /source/script/docker/exec.sh "${_tmp}/exec.sh"
 
   run bash "${_tmp}/exec.sh"
@@ -485,9 +488,11 @@ EOF
 DOCKER_HUB_USER=alice
 IMAGE_NAME=ghost-$$
 EOF
-  mkdir -p "${_tmp}/template/script/docker"
-  cp /source/script/docker/_lib.sh "${_tmp}/template/script/docker/_lib.sh"
-  cp /source/script/docker/i18n.sh "${_tmp}/template/script/docker/i18n.sh" 2>/dev/null || true
+  mkdir -p "${_tmp}/.base/script/docker/lib"
+  cp /source/script/docker/_lib.sh "${_tmp}/.base/script/docker/_lib.sh"
+  cp /source/script/docker/i18n.sh "${_tmp}/.base/script/docker/i18n.sh" 2>/dev/null || true
+  # _lib.sh post-#284 is an umbrella that sources lib/*.sh sub-libs.
+  cp /source/script/docker/lib/*.sh "${_tmp}/.base/script/docker/lib/"
   cp /source/script/docker/exec.sh "${_tmp}/exec.sh"
 
   run bash "${_tmp}/exec.sh" --dry-run
@@ -582,11 +587,15 @@ EOF
 
 _stage_lint_layout() {
   # Simulate Dockerfile.example's /lint/ stage: script + helpers in one
-  # flat directory. Callers pass the script file under test.
+  # flat directory, with the lib/ sub-directory (#284 umbrella sources
+  # lib/*.sh — Dockerfile.example COPYs `.base/script/docker/lib /lint/lib`
+  # to mirror it). Callers pass the script file under test.
   local _dest="${1:?}" _script="${2:?}"
   cp "/source/script/docker/${_script}" "${_dest}/${_script}"
   cp /source/script/docker/_lib.sh   "${_dest}/_lib.sh"
   cp /source/script/docker/i18n.sh   "${_dest}/i18n.sh"
+  mkdir -p "${_dest}/lib"
+  cp /source/script/docker/lib/*.sh  "${_dest}/lib/"
 }
 
 @test "build.sh -h works in /lint/ layout (flat dir with _lib.sh + i18n.sh, issue #104)" {
@@ -629,7 +638,7 @@ _stage_lint_layout() {
 }
 
 @test "build.sh errors with a clear diagnostic when _lib.sh missing from both paths (issue #104)" {
-  # No template/script/docker/_lib.sh nor sibling _lib.sh → explicit
+  # No .base/script/docker/_lib.sh nor sibling _lib.sh → explicit
   # non-zero exit + error message pointing the user at the two
   # expected paths. Better UX than the old silent inline fallback
   # that hid the absence.
@@ -646,11 +655,11 @@ _stage_lint_layout() {
   # Structural guard: if the Dockerfile COPY is dropped, the /lint/
   # smoke test (script_help.bats) would break silently for new
   # downstream repos. Pin it here.
-  run grep -F 'template/script/docker/_lib.sh' /source/dockerfile/Dockerfile.example
+  run grep -F '.base/script/docker/_lib.sh' /source/dockerfile/Dockerfile.example
   assert_success
-  run grep -F 'template/script/docker/i18n.sh' /source/dockerfile/Dockerfile.example
+  run grep -F '.base/script/docker/i18n.sh' /source/dockerfile/Dockerfile.example
   assert_success
-  run grep -F 'template/script/docker/_tui_conf.sh' /source/dockerfile/Dockerfile.example
+  run grep -F '.base/script/docker/_tui_conf.sh' /source/dockerfile/Dockerfile.example
   assert_success
 }
 
@@ -762,15 +771,18 @@ _stage_lint_layout() {
   assert_output --regexp '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
 }
 
-@test "upgrade.sh reads version from template/.version" {
-  run grep -E 'template/\.version' /source/upgrade.sh
+@test "upgrade.sh reads version from <subtree-prefix>/.version" {
+  # Post-v0.25.0 the subtree prefix is parameterised (TEMPLATE_REL) so
+  # the rename `.base/` -> `.base/` works without code change. Assert
+  # the parameterised form rather than the literal `.base/` prefix.
+  run grep -F '${TEMPLATE_REL}/.version' /source/upgrade.sh
   assert_success
 }
 
 @test "upgrade.sh does not reference legacy VERSION or .template_version" {
   # After the .version rename, upgrade.sh must not mention either
   # legacy filename — no backward-compat fallback is carried.
-  run grep -cE 'template/VERSION|\.template_version' /source/upgrade.sh
+  run grep -cE '.base/VERSION|\.template_version' /source/upgrade.sh
   assert_failure
   assert_output "0"
 }
@@ -802,13 +814,13 @@ _stage_lint_layout() {
   local _tmp _yaml
   _tmp="$(mktemp -d)"
   _yaml="${_tmp}/main.yaml"
-  mkdir -p "${_tmp}/template" "${_tmp}/.github/workflows"
+  mkdir -p "${_tmp}/.base" "${_tmp}/.github/workflows"
   cat > "${_yaml}" <<'EOF'
 jobs:
   call-docker-build:
-    uses: ycpss91255-docker/template/.github/workflows/build-worker.yaml@v0.5.0
+    uses: ycpss91255-docker/base/.github/workflows/build-worker.yaml@v0.5.0
   call-release:
-    uses: ycpss91255-docker/template/.github/workflows/release-worker.yaml@v0.5.0
+    uses: ycpss91255-docker/base/.github/workflows/release-worker.yaml@v0.5.0
 EOF
   # Source upgrade.sh and exercise just the sed block by inlining the
   # production sed commands here, mirroring what upgrade.sh does.
@@ -843,9 +855,9 @@ EOF
   cat > "${_yaml}" <<'EOF'
 jobs:
   call-docker-build:
-    uses: ycpss91255-docker/template/.github/workflows/build-worker.yaml@v0.10.0-rc1
+    uses: ycpss91255-docker/base/.github/workflows/build-worker.yaml@v0.10.0-rc1
   call-release:
-    uses: ycpss91255-docker/template/.github/workflows/release-worker.yaml@v0.10.0-rc1
+    uses: ycpss91255-docker/base/.github/workflows/release-worker.yaml@v0.10.0-rc1
 EOF
   local _seds
   _seds="$(grep -E "^[[:space:]]*sed -i" /source/upgrade.sh)"
@@ -876,9 +888,9 @@ EOF
   cat > "${_yaml}" <<'EOF'
 jobs:
   call-docker-build:
-    uses: ycpss91255-docker/template/.github/workflows/build-worker.yaml@v0.10.0-rc2
+    uses: ycpss91255-docker/base/.github/workflows/build-worker.yaml@v0.10.0-rc2
   call-release:
-    uses: ycpss91255-docker/template/.github/workflows/release-worker.yaml@v0.9.9
+    uses: ycpss91255-docker/base/.github/workflows/release-worker.yaml@v0.9.9
 EOF
   local _seds
   _seds="$(grep -E "^[[:space:]]*sed -i" /source/upgrade.sh)"
@@ -940,12 +952,15 @@ EOF
   assert_output "0"
 }
 
-@test "build-worker.yaml: test build passes TEST_TOOLS_IMAGE from inputs" {
+@test "build-worker.yaml: devel-test build passes TEST_TOOLS_IMAGE from inputs" {
   local _yaml="/source/.github/workflows/build-worker.yaml"
   [[ -f "${_yaml}" ]] || skip "build-worker.yaml not present in /source"
+  # Pre-#243 the step was named "Build test stage"; renamed to
+  # "Build devel-test stage" for symmetry with the new runtime-test
+  # stage. The TEST_TOOLS_IMAGE plumbing didn't move.
   run awk '
-    /- name: Build test stage/ { inside = 1 }
-    inside && /^[[:space:]]*- name:/ && !/Build test stage/ { inside = 0 }
+    /- name: Build devel-test stage/ { inside = 1 }
+    inside && /^[[:space:]]*- name:/ && !/Build devel-test stage/ { inside = 0 }
     inside { print }
   ' "${_yaml}"
   assert_success
@@ -985,6 +1000,239 @@ EOF
 }
 
 # ════════════════════════════════════════════════════════════════════
+# Dockerfile.example: runtime-test stage syntax (#243 / v0.21.1 fix /
+# v0.23.1 follow-up)
+#
+# v0.21.0 shipped the runtime-test block with `RUN ${RUNTIME_SMOKE_CMD}`
+# and `USER root`. Both were buggy:
+#   1. Bare `RUN ${ARG}` word-splits the substituted value: shell
+#      operators (&&, ||) and nested quotes get treated as literal
+#      args to the first command. Concrete failure: with default
+#      ARG `bash -lc "whoami && bash --version && exit 0"`, bash
+#      tokenized as `whoami '&&' bash '--version'` and whoami saw
+#      `--version` as an arg, printing its own version info instead
+#      of running the chain. Discovered during sick_humble's manual
+#      v0.21.0 rollout.
+#   2. `USER root` triggered hadolint DL3002 (last USER should not
+#      be root). runtime-test is ephemeral, but hadolint can't
+#      know that; the lint failure was real.
+#
+# v0.21.1 fix: drop USER root (inherit non-root from runtime), and
+# wrap the ARG in `sh -c "..."` so the value is passed as a single
+# string for the shell to parse.
+#
+# v0.23.1 follow-up: `sh -c` (dash) doesn't support `source` or
+# bash parameter expansion, blocking any override that sourced
+# bash-syntax files (e.g. `. /opt/ros/$DISTRO/setup.bash`). Switched
+# to `bash -c` -- bash is present in every Ubuntu/Debian runtime
+# image the template targets, the dependency is safe, and downstream
+# overrides can now use natural shell semantics. Discovered during
+# the v0.21.1 runtime-test framework's downstream rollout
+# (ycpss91255-docker/docker_harness#57); see also
+# ycpss91255-docker/template#249.
+#
+# The grep tests below lock all three invariants (positive: bash -c
+# wrapper present; negative: no bare ARG substitution; negative:
+# no stale sh -c wrapper) so the bug can't regress.
+# ════════════════════════════════════════════════════════════════════
+
+@test "Dockerfile.example runtime-test uses bash -c wrapper (regression: #243 word-split + #57 dash-source bugs)" {
+  local _df="/source/dockerfile/Dockerfile.example"
+  [[ -f "${_df}" ]] || skip "Dockerfile.example not present in /source"
+  # The runtime-test block is commented out (opt-in for repos with a
+  # runtime stage). The RUN line in the comment must use bash -c so
+  # downstream RUNTIME_SMOKE_CMD overrides can use bash semantics
+  # (source / . of bash-syntax files, parameter expansion, etc.).
+  run grep -E '^# RUN bash -c "\$\{RUNTIME_SMOKE_CMD\}"$' "${_df}"
+  assert_success
+}
+
+@test "Dockerfile.example runtime-test does NOT use bare RUN \${RUNTIME_SMOKE_CMD} (v0.21.0 word-split regression guard)" {
+  local _df="/source/dockerfile/Dockerfile.example"
+  [[ -f "${_df}" ]] || skip "Dockerfile.example not present in /source"
+  # Regression guard: bare form word-splits operators / nested quotes.
+  run grep -E '^# RUN \$\{RUNTIME_SMOKE_CMD\}$' "${_df}"
+  [ "${status}" -ne 0 ] || [ -z "${output}" ]
+}
+
+@test "Dockerfile.example runtime-test does NOT use sh -c wrapper (v0.21.1 -> v0.23.1 dash-source regression guard)" {
+  local _df="/source/dockerfile/Dockerfile.example"
+  [[ -f "${_df}" ]] || skip "Dockerfile.example not present in /source"
+  # Regression guard: sh -c (dash) cannot parse bash-syntax files in
+  # `source` / `.` overrides. Blocks all ROS-style smoke commands.
+  # See ycpss91255-docker/docker_harness#57 + #249 for context.
+  run grep -E '^# RUN sh -c "\$\{RUNTIME_SMOKE_CMD\}"$' "${_df}"
+  [ "${status}" -ne 0 ] || [ -z "${output}" ]
+}
+
+@test "Dockerfile.example runtime-test does NOT set USER root (DL3002 regression guard)" {
+  local _df="/source/dockerfile/Dockerfile.example"
+  [[ -f "${_df}" ]] || skip "Dockerfile.example not present in /source"
+  # Hadolint DL3002 fires on `USER root` if it ends up the last USER
+  # in the Dockerfile. runtime-test inherits non-root from runtime;
+  # leave it that way. Downstream override via sudo if privileged
+  # smoke is genuinely needed.
+  #
+  # Match the commented-out form in Dockerfile.example.
+  run grep -E '^# USER root$' "${_df}"
+  [ "${status}" -ne 0 ] || [ -z "${output}" ]
+}
+
+# ════════════════════════════════════════════════════════════════════
+# Dockerfile.example: builder + runtime split pattern (#239)
+#
+# Lifts the three lessons proven empirically in
+# ycpss91255-docker/ros1_bridge#60 (saved ~1.1 GB/arch on runtime):
+#   1. runtime MUST NOT be FROM devel -- forces devel to delete its
+#      own source to avoid runtime bloat, breaking the dev workflow.
+#   2. Runtime apt: install only the ldd-identified missing libs.
+#      Bulk-installing builder deps defeats the runtime/devel split.
+#   3. `source FILE` in entrypoints needs trailing `--` (ROS 1 catkin
+#      / _setup_util.py argparse pitfall when CMD has --flag args).
+#
+# Tests below grep for marker text proving each lesson is documented
+# inline so the commented-out reference pattern can't silently lose
+# them.
+# ════════════════════════════════════════════════════════════════════
+
+@test "Dockerfile.example top stage-list documents builder stage (#239)" {
+  local _df="/source/dockerfile/Dockerfile.example"
+  [[ -f "${_df}" ]] || skip "Dockerfile.example not present in /source"
+  # The top-of-file "Stages:" comment is the first thing a user
+  # reading the template sees. builder must appear there or the
+  # downstream pattern is invisible.
+  run grep -E '^#   builder ' "${_df}"
+  assert_success
+}
+
+@test "Dockerfile.example documents 3 builder/runtime split lessons (#239)" {
+  local _df="/source/dockerfile/Dockerfile.example"
+  [[ -f "${_df}" ]] || skip "Dockerfile.example not present in /source"
+  # Three explicit lesson markers (text must persist verbatim in
+  # the commented-out reference block so the lift from ros1_bridge#60
+  # stays load-bearing).
+  run grep -F 'runtime` MUST NOT be `FROM devel`' "${_df}"
+  assert_success
+  run grep -F 'install only the libs `ldd` proves are missing' "${_df}"
+  assert_success
+  run grep -F 'source FILE` in entrypoints needs a trailing `--`' "${_df}"
+  assert_success
+}
+
+@test "Dockerfile.example has commented-out builder + runtime + COPY --from=builder reference (#239)" {
+  local _df="/source/dockerfile/Dockerfile.example"
+  [[ -f "${_df}" ]] || skip "Dockerfile.example not present in /source"
+  # The concrete commented-out skeleton downstream can uncomment.
+  # All three lines must be commented (#-prefixed) so the example
+  # doesn't try to build by default; downstream uncomments when
+  # opting in via main.yaml build_runtime: true.
+  run grep -E '^# FROM devel-base AS builder$' "${_df}"
+  assert_success
+  run grep -E '^# FROM \$\{BASE_IMAGE\} AS runtime-base$' "${_df}"
+  assert_success
+  run grep -E '^# COPY --from=builder ' "${_df}"
+  assert_success
+}
+
+# ════════════════════════════════════════════════════════════════════
+# pip relocation: config/pip/ -> dockerfile/setup/pip/ (#261)
+#
+# config/ is the user-facing override surface post-#254 (layered COPY:
+# .base/config/ defaults + <repo>/config/ overlay = runtime files
+# in the user's interactive shell). pip/setup.sh was the odd one out --
+# build-time install scaffolding that ran once then got wiped by
+# `sudo rm -rf ${CONFIG_DIR}`, never user-facing. Mental-model
+# violation against #254's drop-in semantics + forced every downstream
+# to keep pip/setup.sh in their <repo>/config/ snapshot. #261 moves
+# it to .base/dockerfile/setup/pip/ -- a separate dir intended for
+# build-time scaffolding only, copied into ${SETUP_DIR} (no layered
+# override, single source of truth), cleared alongside CONFIG_DIR.
+#
+# Tests below lock the new path + the Dockerfile.example pattern (new
+# ARG + COPY + RUN + cleanup) so the relocation can't silently revert.
+# ════════════════════════════════════════════════════════════════════
+
+@test "template ships dockerfile/setup/pip/setup.sh + requirements.txt (#261)" {
+  [[ -f /source/dockerfile/setup/pip/setup.sh ]]
+  [[ -x /source/dockerfile/setup/pip/setup.sh ]]
+  [[ -f /source/dockerfile/setup/pip/requirements.txt ]]
+}
+
+@test "template no longer ships config/pip/ (#261 relocation regression guard)" {
+  # If a future change moves pip/ back under config/, this fires. The
+  # whole point of #261 was to keep config/ pure runtime-override
+  # surface; resurrecting config/pip/ undoes that.
+  [[ ! -e /source/config/pip ]]
+}
+
+@test "Dockerfile.example declares ARG SETUP_DIR for build-time scaffolding (#261)" {
+  local _df="/source/dockerfile/Dockerfile.example"
+  [[ -f "${_df}" ]] || skip "Dockerfile.example not present in /source"
+  run grep -E '^ARG SETUP_DIR="/tmp/setup"$' "${_df}"
+  assert_success
+}
+
+@test "Dockerfile.example COPYs .base/dockerfile/setup into SETUP_DIR (#261)" {
+  local _df="/source/dockerfile/Dockerfile.example"
+  [[ -f "${_df}" ]] || skip "Dockerfile.example not present in /source"
+  run grep -E '^COPY --chmod=0755 .base/dockerfile/setup "\$\{SETUP_DIR\}"$' "${_df}"
+  assert_success
+}
+
+@test "Dockerfile.example RUN pip uses SETUP_DIR not CONFIG_DIR (#261)" {
+  local _df="/source/dockerfile/Dockerfile.example"
+  [[ -f "${_df}" ]] || skip "Dockerfile.example not present in /source"
+  # Positive: new location
+  run grep -E '^RUN "\$\{SETUP_DIR\}"/pip/setup\.sh$' "${_df}"
+  assert_success
+  # Negative regression guard: no leftover ${CONFIG_DIR}/pip/setup.sh
+  run grep -E '^RUN "\$\{CONFIG_DIR\}"/pip/setup\.sh$' "${_df}"
+  [ "${status}" -ne 0 ] || [ -z "${output}" ]
+}
+
+@test "Dockerfile.example cleans up SETUP_DIR alongside CONFIG_DIR (#261)" {
+  local _df="/source/dockerfile/Dockerfile.example"
+  [[ -f "${_df}" ]] || skip "Dockerfile.example not present in /source"
+  # SETUP_DIR must be removed in the same image layer as CONFIG_DIR
+  # (both are build-time-only). Match the literal cleanup line.
+  run grep -E '^    sudo rm -rf "\$\{CONFIG_DIR\}" "\$\{SETUP_DIR\}"$' "${_df}"
+  assert_success
+}
+
+# ════════════════════════════════════════════════════════════════════
+# Dockerfile.example: ENV alignment with downstream fleet (#210)
+#
+# All 17 hand-written downstream Dockerfiles declare ENV TZ +
+# ENV LANGUAGE alongside ENV LC_ALL / ENV LANG. Pre-#210 the seed
+# Dockerfile.example only had LC_ALL / LANG; downstream-derived images
+# from `/new-repo` therefore silently differed from the fleet on
+# runtime $TZ and $LANGUAGE. The gap surfaces only for consumers that
+# read the env directly (Python tzlocal, gettext fallback, some JVM
+# tz resolution paths), but new repos should match the fleet.
+# ════════════════════════════════════════════════════════════════════
+
+@test "Dockerfile.example declares ENV TZ (matches downstream fleet, #210)" {
+  local _df="/source/dockerfile/Dockerfile.example"
+  [[ -f "${_df}" ]] || skip "Dockerfile.example not present in /source"
+  # Forwards the build-time ARG TZ value into a runtime env. ENV without
+  # an explicit value would inherit the ARG, which is what we want — the
+  # exact spelling the test locks is `ENV TZ="${TZ}"` to mirror how the
+  # 17 downstream Dockerfiles spell it.
+  run grep -E '^ENV TZ="\$\{TZ\}"$' "${_df}"
+  assert_success
+}
+
+@test "Dockerfile.example declares ENV LANGUAGE=en_US:en (matches downstream fleet, #210)" {
+  local _df="/source/dockerfile/Dockerfile.example"
+  [[ -f "${_df}" ]] || skip "Dockerfile.example not present in /source"
+  # Same value the 17 downstream Dockerfiles use; gettext fallback uses
+  # $LANGUAGE in addition to $LANG so unset means the fallback chain
+  # collapses to en_US only.
+  run grep -E '^ENV LANGUAGE="en_US:en"$' "${_df}"
+  assert_success
+}
+
+# ════════════════════════════════════════════════════════════════════
 # release-test-tools.yaml: GHCR publisher workflow
 # ════════════════════════════════════════════════════════════════════
 
@@ -1011,14 +1259,14 @@ EOF
 
 @test "release-test-tools.yaml uses template-repo-local Dockerfile path" {
   # Regression: this workflow runs in the template repo, so Dockerfile.test-tools
-  # path must be `dockerfile/...` (not `template/dockerfile/...` which is the
+  # path must be `dockerfile/...` (not `.base/dockerfile/...` which is the
   # downstream subtree path used by build-worker.yaml).
   local _yaml="/source/.github/workflows/release-test-tools.yaml"
   [[ -f "${_yaml}" ]] || skip "release-test-tools.yaml not present in /source"
   run grep -E '^\s*file: dockerfile/Dockerfile\.test-tools$' "${_yaml}"
   assert_success
   # And must NOT have the subtree-prefixed path:
-  run grep -c 'file: template/dockerfile/Dockerfile.test-tools' "${_yaml}"
+  run grep -c 'file: .base/dockerfile/Dockerfile.test-tools' "${_yaml}"
   assert_output "0"
 }
 
@@ -1050,7 +1298,7 @@ EOF
   assert_success
   assert_output --partial 'Dockerfile'
   assert_output --partial 'build.sh'
-  assert_output --partial 'template/'
+  assert_output --partial '.base/'
 }
 
 # ════════════════════════════════════════════════════════════════════
@@ -1077,7 +1325,7 @@ EOF
 # ════════════════════════════════════════════════════════════════════
 
 @test "setup.sh default _base_path uses /.." {
-  # In template, setup.sh is at template/script/docker/setup.sh
+  # In template, setup.sh is at .base/script/docker/setup.sh
   # So it should go up 1 level (/..) to reach repo root
   run grep -E '\.\./\.\.' /source/script/docker/setup.sh
   assert_success  # Should have ../../ ../../ (that was old docker_setup_helper/src/ pattern)

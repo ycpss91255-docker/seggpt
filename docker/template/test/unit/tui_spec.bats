@@ -15,6 +15,8 @@ setup() {
 
   create_mock_dir
   TEMP_DIR="$(mktemp -d)"
+  # Post-#262 path: setup.conf lives at config/docker/setup.conf
+  mkdir -p "${TEMP_DIR}/config/docker"
 }
 
 teardown() {
@@ -469,7 +471,7 @@ teardown() {
 # ════════════════════════════════════════════════════════════════════
 
 @test "_load_setup_conf_full reads all sections preserving order" {
-  cat > "${TEMP_DIR}/setup.conf" <<'EOF'
+  cat > "${TEMP_DIR}/config/docker/setup.conf" <<'EOF'
 [image]
 rules = @default:foo
 
@@ -482,7 +484,7 @@ mount_1 = /a:/a
 mount_2 = /b:/b
 EOF
   local -a _sections=() _keys=() _values=()
-  _load_setup_conf_full "${TEMP_DIR}/setup.conf" _sections _keys _values
+  _load_setup_conf_full "${TEMP_DIR}/config/docker/setup.conf" _sections _keys _values
 
   assert_equal "${_sections[0]}" "image"
   assert_equal "${_sections[1]}" "build"
@@ -490,13 +492,13 @@ EOF
 }
 
 @test "_load_setup_conf_full reads key/value pairs" {
-  cat > "${TEMP_DIR}/setup.conf" <<'EOF'
+  cat > "${TEMP_DIR}/config/docker/setup.conf" <<'EOF'
 [deploy]
 gpu_mode = auto
 gpu_count = 2
 EOF
   local -a _sections=() _keys=() _values=()
-  _load_setup_conf_full "${TEMP_DIR}/setup.conf" _sections _keys _values
+  _load_setup_conf_full "${TEMP_DIR}/config/docker/setup.conf" _sections _keys _values
 
   # Entries are section-scoped key=value; format is
   #   _keys[i]="<section>.<key>", _values[i]="<value>"
@@ -626,15 +628,15 @@ EOF
 # ════════════════════════════════════════════════════════════════════
 
 @test "_upsert_conf_value updates existing key value" {
-  cat > "${TEMP_DIR}/setup.conf" <<'EOF'
+  cat > "${TEMP_DIR}/config/docker/setup.conf" <<'EOF'
 [volumes]
 mount_1 =
 mount_2 = /dev:/dev
 EOF
-  _upsert_conf_value "${TEMP_DIR}/setup.conf" "volumes" "mount_1" \
+  _upsert_conf_value "${TEMP_DIR}/config/docker/setup.conf" "volumes" "mount_1" \
     '/host:/home/${USER_NAME}/work'
 
-  run grep '^mount_1' "${TEMP_DIR}/setup.conf"
+  run grep '^mount_1' "${TEMP_DIR}/config/docker/setup.conf"
   [[ "${output}" == "mount_1 = /host:/home/\${USER_NAME}/work" ]]
 }
 
@@ -677,29 +679,29 @@ EOF
 }
 
 @test "_upsert_conf_value leaves other sections untouched" {
-  cat > "${TEMP_DIR}/setup.conf" <<'EOF'
+  cat > "${TEMP_DIR}/config/docker/setup.conf" <<'EOF'
 [image]
 rules = @default:foo
 
 [volumes]
 mount_1 =
 EOF
-  _upsert_conf_value "${TEMP_DIR}/setup.conf" "volumes" "mount_1" "/a:/b"
+  _upsert_conf_value "${TEMP_DIR}/config/docker/setup.conf" "volumes" "mount_1" "/a:/b"
 
-  run grep '^rules' "${TEMP_DIR}/setup.conf"
+  run grep '^rules' "${TEMP_DIR}/config/docker/setup.conf"
   [[ "${output}" == "rules = @default:foo" ]]
 }
 
 @test "_upsert_conf_value creates section + key when section absent" {
   # Coverage gap: `Section not found at all → append new section + key`
   # branch at the tail of _upsert_conf_value was never exercised.
-  cat > "${TEMP_DIR}/setup.conf" <<'EOF'
+  cat > "${TEMP_DIR}/config/docker/setup.conf" <<'EOF'
 [image]
 rule_1 = @default:foo
 EOF
-  _upsert_conf_value "${TEMP_DIR}/setup.conf" "volumes" "mount_1" "/a:/b"
+  _upsert_conf_value "${TEMP_DIR}/config/docker/setup.conf" "volumes" "mount_1" "/a:/b"
 
-  run cat "${TEMP_DIR}/setup.conf"
+  run cat "${TEMP_DIR}/config/docker/setup.conf"
   assert_output --partial "[volumes]"
   assert_output --partial "mount_1 = /a:/b"
   # Pre-existing section untouched
@@ -709,16 +711,16 @@ EOF
 @test "_upsert_conf_value appends key at EOF when section is the last one without target key" {
   # Coverage gap: "Still in target section at EOF and key not matched →
   # append" branch of _upsert_conf_value.
-  cat > "${TEMP_DIR}/setup.conf" <<'EOF'
+  cat > "${TEMP_DIR}/config/docker/setup.conf" <<'EOF'
 [image]
 rule_1 = @default:foo
 
 [volumes]
 mount_1 = /a:/a
 EOF
-  _upsert_conf_value "${TEMP_DIR}/setup.conf" "volumes" "mount_2" "/b:/b"
+  _upsert_conf_value "${TEMP_DIR}/config/docker/setup.conf" "volumes" "mount_2" "/b:/b"
 
-  run cat "${TEMP_DIR}/setup.conf"
+  run cat "${TEMP_DIR}/config/docker/setup.conf"
   assert_output --partial "mount_1 = /a:/a"
   assert_output --partial "mount_2 = /b:/b"
 }
@@ -1292,4 +1294,168 @@ _b_remove_setup() {
   local _v1
   _v1="$(_override_get "image.rule_1" "")"
   [ -z "${_v1}" ]
+}
+
+# ════════════════════════════════════════════════════════════════════
+# Per-stage [stage:NAME] section round-trip (#220)
+#
+# `_load_setup_conf_full` already namespaces all keys as
+# `<section>.<key>`, so reading `[stage:headless] gui.mode = off`
+# produces `stage:headless.gui.mode = off` automatically (the
+# section name "stage:headless" is opaque to the parser).
+#
+# `_write_setup_conf` historically only handled overrides for
+# sections present in the template. #220 needs it to emit NEW
+# `[stage:NAME]` sections too, since template's setup.conf doesn't
+# carry per-repo stage overrides.
+# ════════════════════════════════════════════════════════════════════
+
+@test "_load_setup_conf_full reads [stage:NAME] sections with namespaced keys" {
+  cat > "${TEMP_DIR}/config/docker/setup.conf" <<'EOF'
+[gui]
+mode = auto
+
+[stage:headless]
+gui.mode = off
+network.mode = bridge
+network.port_1 = 8080:80
+
+[stage:gui]
+gui.mode = auto
+EOF
+  local -a _sections=() _keys=() _values=()
+  _load_setup_conf_full "${TEMP_DIR}/config/docker/setup.conf" _sections _keys _values
+
+  # Sections: gui, stage:headless, stage:gui in file order
+  [[ "${_sections[0]}" == "gui" ]] || { echo "expected gui, got ${_sections[0]}"; return 1; }
+  [[ "${_sections[1]}" == "stage:headless" ]] || { echo "expected stage:headless, got ${_sections[1]}"; return 1; }
+  [[ "${_sections[2]}" == "stage:gui" ]] || { echo "expected stage:gui, got ${_sections[2]}"; return 1; }
+
+  # Stage-namespaced keys are present
+  local _found_gui_mode=0 _found_net_mode=0 _found_port=0 _found_gui_stage=0
+  local i
+  for (( i=0; i<${#_keys[@]}; i++ )); do
+    case "${_keys[i]}" in
+      "stage:headless.gui.mode")
+        [[ "${_values[i]}" == "off" ]] && _found_gui_mode=1 ;;
+      "stage:headless.network.mode")
+        [[ "${_values[i]}" == "bridge" ]] && _found_net_mode=1 ;;
+      "stage:headless.network.port_1")
+        [[ "${_values[i]}" == "8080:80" ]] && _found_port=1 ;;
+      "stage:gui.gui.mode")
+        [[ "${_values[i]}" == "auto" ]] && _found_gui_stage=1 ;;
+    esac
+  done
+  (( _found_gui_mode )) || { echo "missing stage:headless.gui.mode=off"; return 1; }
+  (( _found_net_mode )) || { echo "missing stage:headless.network.mode=bridge"; return 1; }
+  (( _found_port )) || { echo "missing stage:headless.network.port_1=8080:80"; return 1; }
+  (( _found_gui_stage )) || { echo "missing stage:gui.gui.mode=auto"; return 1; }
+}
+
+@test "_write_setup_conf appends new [stage:NAME] section when not present in template" {
+  # Template has no per-stage section; user TUI Save adds one. Without
+  # the new-section flush, the override would be silently lost.
+  cat > "${TEMP_DIR}/template.conf" <<'EOF'
+[gui]
+mode = auto
+
+[network]
+mode = host
+EOF
+  local -a _sections=("stage:headless") \
+    _keys=("stage:headless.gui.mode" "stage:headless.network.mode") \
+    _values=("off" "bridge")
+  _write_setup_conf "${TEMP_DIR}/out.conf" "${TEMP_DIR}/template.conf" \
+    _sections _keys _values
+
+  run cat "${TEMP_DIR}/out.conf"
+  assert_success
+  # Original sections preserved
+  assert_output --partial "[gui]"
+  assert_output --partial "mode = auto"
+  assert_output --partial "[network]"
+  assert_output --partial "mode = host"
+  # New stage section emitted with its keys
+  assert_output --partial "[stage:headless]"
+  assert_output --partial "gui.mode = off"
+  assert_output --partial "network.mode = bridge"
+}
+
+@test "_write_setup_conf supports multiple new [stage:*] sections in one write" {
+  cat > "${TEMP_DIR}/template.conf" <<'EOF'
+[gui]
+mode = auto
+EOF
+  local -a _sections=("stage:headless" "stage:gui") \
+    _keys=("stage:headless.gui.mode" "stage:gui.gui.mode") \
+    _values=("off" "force")
+  _write_setup_conf "${TEMP_DIR}/out.conf" "${TEMP_DIR}/template.conf" \
+    _sections _keys _values
+
+  run cat "${TEMP_DIR}/out.conf"
+  assert_success
+  assert_output --partial "[stage:headless]"
+  assert_output --partial "[stage:gui]"
+}
+
+@test "_write_setup_conf round-trips [stage:NAME] via _load_setup_conf_full" {
+  cat > "${TEMP_DIR}/template.conf" <<'EOF'
+[gui]
+mode = auto
+EOF
+  local -a _sections=("gui" "stage:headless") \
+    _keys=("gui.mode" "stage:headless.gui.mode" "stage:headless.network.port_1") \
+    _values=("auto" "off" "8080:80")
+  _write_setup_conf "${TEMP_DIR}/out.conf" "${TEMP_DIR}/template.conf" \
+    _sections _keys _values
+
+  local -a _sect2=() _keys2=() _values2=()
+  _load_setup_conf_full "${TEMP_DIR}/out.conf" _sect2 _keys2 _values2
+
+  # stage:headless section present after round-trip
+  local _has_stage=0 s
+  for s in "${_sect2[@]}"; do
+    [[ "${s}" == "stage:headless" ]] && _has_stage=1
+  done
+  (( _has_stage )) || { echo "stage:headless lost in round-trip: sections=${_sect2[*]}"; return 1; }
+
+  # Both stage keys survive
+  local _found_gui=0 _found_port=0 i
+  for (( i=0; i<${#_keys2[@]}; i++ )); do
+    case "${_keys2[i]}" in
+      "stage:headless.gui.mode")        [[ "${_values2[i]}" == "off" ]] && _found_gui=1 ;;
+      "stage:headless.network.port_1")  [[ "${_values2[i]}" == "8080:80" ]] && _found_port=1 ;;
+    esac
+  done
+  (( _found_gui )) || { echo "stage:headless.gui.mode not round-tripped"; return 1; }
+  (( _found_port )) || { echo "stage:headless.network.port_1 not round-tripped"; return 1; }
+}
+
+@test "_write_setup_conf preserves existing [stage:NAME] when re-saving" {
+  # Common case: user Saves once → repo setup.conf has [stage:headless].
+  # On the next Save (still editing same stage), _commit_and_setup uses
+  # the EXISTING repo conf as the template_src, so [stage:headless] is
+  # already present in template. The writer must update the value
+  # in-place via the existing-section path (not via the new-section
+  # append, which would dup the section).
+  cat > "${TEMP_DIR}/template.conf" <<'EOF'
+[gui]
+mode = auto
+
+[stage:headless]
+gui.mode = off
+EOF
+  local -a _sections=("stage:headless") \
+    _keys=("stage:headless.gui.mode") \
+    _values=("force")
+  _write_setup_conf "${TEMP_DIR}/out.conf" "${TEMP_DIR}/template.conf" \
+    _sections _keys _values
+
+  run cat "${TEMP_DIR}/out.conf"
+  assert_success
+  # Updated value in-place
+  assert_output --partial "gui.mode = force"
+  # Section header appears exactly once (no duplicate appended at EOF)
+  run grep -c "^\[stage:headless\]$" "${TEMP_DIR}/out.conf"
+  assert_output "1"
 }

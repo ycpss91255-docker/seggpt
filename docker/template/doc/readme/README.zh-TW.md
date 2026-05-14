@@ -1,13 +1,13 @@
 # template
 
-[![Self Test](https://github.com/ycpss91255-docker/template/actions/workflows/self-test.yaml/badge.svg)](https://github.com/ycpss91255-docker/template/actions/workflows/self-test.yaml)
-[![codecov](https://codecov.io/gh/ycpss91255-docker/template/branch/main/graph/badge.svg)](https://codecov.io/gh/ycpss91255-docker/template)
+[![Self Test](https://github.com/ycpss91255-docker/base/actions/workflows/self-test.yaml/badge.svg)](https://github.com/ycpss91255-docker/base/actions/workflows/self-test.yaml)
+[![codecov](https://codecov.io/gh/ycpss91255-docker/base/branch/main/graph/badge.svg)](https://codecov.io/gh/ycpss91255-docker/base)
 
 ![Language](https://img.shields.io/badge/Language-Bash-blue?style=flat-square)
 ![Testing](https://img.shields.io/badge/Testing-Bats-orange?style=flat-square)
 ![ShellCheck](https://img.shields.io/badge/ShellCheck-Compliant-brightgreen?style=flat-square)
 ![Coverage](https://img.shields.io/badge/Coverage-Kcov-blueviolet?style=flat-square)
-[![License](https://img.shields.io/badge/License-GPL--3.0-yellow?style=flat-square)](./LICENSE)
+[![License](https://img.shields.io/badge/License-Apache--2.0-blue?style=flat-square)](../../LICENSE)
 
 [ycpss91255-docker](https://github.com/ycpss91255-docker) 組織下所有 Docker 容器 repo 的共用模板。
 
@@ -34,9 +34,9 @@
 mkdir <repo_name> && cd <repo_name>
 git init
 git commit --allow-empty -m "chore: initial commit"
-git subtree add --prefix=template \
-    https://github.com/ycpss91255-docker/template.git main --squash
-./template/init.sh
+git subtree add --prefix=.base \
+    https://github.com/ycpss91255-docker/base.git main --squash
+./.base/init.sh
 
 # 升級到最新版
 make upgrade-check   # 檢查
@@ -63,10 +63,10 @@ graph TB
         workflows["可重用 Workflows<br/>build-worker.yaml<br/>release-worker.yaml"]
     end
 
-    subgraph consumer["Docker Repo（如 ros_noetic）"]
-        symlinks["build.sh → template/script/docker/build.sh<br/>run.sh → template/script/docker/run.sh<br/>exec.sh / stop.sh / .hadolint.yaml"]
+    subgraph consumer["Docker Repo（例如 my_app）"]
+        symlinks["build.sh → .base/script/docker/build.sh<br/>run.sh → .base/script/docker/run.sh<br/>exec.sh / stop.sh / .hadolint.yaml"]
         dockerfile["Dockerfile<br/>compose.yaml<br/>.env.example<br/>script/entrypoint.sh"]
-        repo_test["test/smoke/<br/>ros_env.bats（repo 專屬）"]
+        repo_test["test/smoke/<br/>app_env.bats（repo 專屬）"]
         main_yaml["main.yaml<br/>→ 呼叫可重用 workflows"]
     end
 
@@ -157,6 +157,103 @@ flowchart LR
   <repo>:devel` 後會看到的內容。
 - `Dockerfile.test-tools` 建置 lint/test 工具集（bats + shellcheck + hadolint）。下游 `test` 階段透過 `ARG TEST_TOOLS_IMAGE` build arg 引用 — 預設 `test-tools:local`（對應本地 `./build.sh` 流程,把 `Dockerfile.test-tools` 建到 host Docker daemon）。CI 則覆寫成 `ghcr.io/ycpss91255-docker/test-tools:vX.Y.Z`（由 `.github/workflows/release-test-tools.yaml` 在每次 tag 推的預建 multi-arch image）,buildx 直接從 registry 拉對應架構的 bats / shellcheck / hadolint binary,避開 `docker-container` buildx driver 跨 step 不共享 image store 的問題。
 
+#### 新增額外 stage（#215）
+
+任何在 baseline blocklist `{sys, devel-base, devel, devel-test,
+runtime-test}` 之外的（v0.21.x 過渡期同時接受舊名 `{base, test}`）
+`FROM <base> AS <stage>`，會被自動 emit 成一個 compose 服務 —
+`extends: devel`（繼承 volumes / network / GPU / GUI / cap_add /
+additional_contexts），只 override `build.target` / `image` /
+`container_name` / `stdin_open` / `tty` / `profiles`。典型用例是
+entrypoint 變體，如 NVIDIA Isaac Sim 在 `devel` 之上的
+`headless` + `gui` 兩種啟動模式。
+
+User 操作流程：
+
+```dockerfile
+# Dockerfile 加新 stage（不用動 setup.conf）
+FROM devel AS headless
+ENTRYPOINT ["/isaac-sim/runheadless.sh"]
+CMD ["-v"]
+
+FROM devel AS gui
+ENTRYPOINT ["/isaac-sim/runapp.sh"]
+```
+
+```bash
+./build.sh                    # 重新產 compose.yaml，build 所有 stages
+./run.sh -t headless          # 跑 headless 變體
+./run.sh -t gui               # 跑 gui 變體
+./exec.sh -t headless bash    # 進入 running 的 headless container
+```
+
+限制：
+
+- Stage 名必須符合 `^[a-z][a-z0-9_-]*$` — 大寫 / 數字開頭 / 點號
+  等會被拒（WARN + 跳過，其他 stage 繼續解析）。
+- 撞到 baseline（`sys` / `devel-base` / `devel` / `devel-test` /
+  `runtime-test`，v0.21.x 過渡期亦同時接受舊名 `base` / `test`）
+  `setup.sh apply` hard error 退出 1。撞到 template 控制的 image
+  tag namespace（`latest`、`v[0-9]*`）也是 hard error。
+- 加 / 移 stage 會觸發 `setup.sh check-drift`（透過 `.env` 內的
+  `SETUP_DOCKERFILE_HASH`），下次 wrapper 跑會自動 regen
+  `compose.yaml`。其他 `RUN apt-get install` 等修改**不會**觸發 drift。
+
+#### Per-stage `setup.conf` overrides（#220）
+
+#215 auto-emit 出來的 stage 預設共用 devel 的 runtime 設定
+（volumes / GPU / network / GUI）。當某 stage 需要不同的 runtime
+設定 — 例如 NVIDIA Isaac Sim 的 `headless` 跑 WebRTC livestream
+要 `network=bridge` + 一個 port mapping + `gui=off`，但 `devel`
+跟 `gui` 維持 `network=host` + X11 — 在 repo 的 `setup.conf` 加上
+`[stage:<name>]` section：
+
+```ini
+[gui]
+mode = auto
+
+[network]
+mode = host
+
+[stage:headless]
+gui.mode = off
+network.mode = bridge
+network.port_1 = 8080:80
+deploy.gpu_capabilities = gpu compute utility graphics video
+```
+
+也可以用 `./setup_tui.sh` 走互動式編輯：
+
+- **Advanced → Per-stage overrides**：直接進編輯器；該 entry 只在
+  Dockerfile 有至少一個非 baseline stage 時才會出現。
+- **Features → Per-stage overrides**（#221）：永久可見的功能總覽
+  入口；條件已滿足時點下去等同上述 Advanced 路徑，未滿足時會跳
+  msgbox 說明如何啟用。
+
+允許 override 的 key（v1）：
+
+| Section | Keys |
+|---|---|
+| `[deploy]` | `gpu_mode`, `gpu_count`, `gpu_capabilities`, `runtime` |
+| `[gui]` | `mode` |
+| `[network]` | `mode`, `ipc`, `network_name`, `port_<N>`, `port_inherit` |
+| `[security]` | `privileged` |
+| `[volumes]` | `mount_<N>`, `mount_inherit` |
+| `[environment]` | `env_<N>`, `env_inherit` |
+
+List 欄位（`mount_*` / `port_*` / `env_*`）採 **append-default**：
+stage 的項目附加在 top-level 之後。要完全取代 top-level，設
+`<list>_inherit = false`（例：`volumes.mount_inherit = false`）。
+
+注意事項：
+
+- `[stage:devel]` 是**保留**的 (v1 no-op + WARN)。要調 devel 直接
+  改 top-level section。v2 會重新評估。
+- `[stage:sys|base|test]` 是 **hard error**（baseline collision）。
+- `[stage:foo]` 對應的 stage 在 Dockerfile 不存在 → **WARN + 跳過**
+  （`setup.sh apply` 其他流程繼續）。
+- 不在 allowlist 內的 override key → **WARN + 跳過該 key**。
+
 ### Smoke test helpers（供下游 repo 使用）
 
 `test/smoke/test_helper.bash`（每個 smoke spec 透過
@@ -179,7 +276,10 @@ assertion helpers。下游 repo 應優先使用這些 helper 而非原生的
 - `Dockerfile`
 - `compose.yaml`
 - `.env.example`
-- `script/entrypoint.sh`
+- `script/` — repo 本地的 **runtime helpers**（在 container 內被 `ENTRYPOINT` / `CMD` 或人工呼叫）
+  - `script/entrypoint.sh`（canonical）
+  - 任何 ros / app 啟動 helper 等
+- `script/docker/` — repo 本地的 **Dockerfile-internal build helpers**（在 Dockerfile `RUN` 階段呼叫，container 啟動後不會用到；範例與 lint COPY 見 `dockerfile/Dockerfile.example`，#275）
 - `doc/` 和 `README.md`
 - Repo 專屬的 smoke test
 
@@ -190,7 +290,7 @@ assertion helpers。下游 repo 應優先使用這些 helper 而非原生的
 `setup.sh` 讀它 + 系統偵測後重新產生 `.env` 跟 `compose.yaml`，這
 兩個衍生檔使用者不用動手編輯。
 
-### 單一 conf、6 個 section
+### 單一 conf、7 個 section
 
 ```
 [image]    rules = prefix:docker_, suffix:_ws, @default:unknown
@@ -200,9 +300,11 @@ assertion helpers。下游 repo 應優先使用這些 helper 而非原生的
 [network]  mode (host|bridge|none)、ipc、privileged
 [volumes]  mount_1（workspace，首次 setup.sh 執行時自動填入）
            mount_2..mount_N（使用者自訂額外 host mount；/dev 裝置走 path）
+[logging]  driver（預設 json-file）、max_size、max_file、compress
+           [logging.<svc>] 可對單一 service 做 key-level override
 ```
 
-Template default 在 `template/setup.conf`；per-repo 覆蓋放 `<repo>/setup.conf`。
+Template default 在 `.base/setup.conf`；per-repo 覆蓋放 `<repo>/setup.conf`。
 Section-level **replace** 策略：per-repo 檔若有該 section 就整段取代
 template；沒寫的 section 則吃 template 預設。
 
@@ -214,27 +316,58 @@ template；沒寫的 section 則吃 template 預設。
 ./setup_tui.sh                      # 互動式 dialog/whiptail 編輯器
 ./setup_tui.sh volumes              # 直接跳到指定 section
 ./build.sh --setup            # 有 TTY 時啟動 setup_tui.sh；無 TTY 時執行 setup.sh
-./template/init.sh --gen-conf # 單純複製 template/setup.conf 到 repo 根目錄
+./.base/init.sh --gen-conf # 單純複製 .base/setup.conf 到 repo 根目錄
 ```
 
 ### 互動式 TUI
 
-`./setup_tui.sh` 開啟主選單，可編輯 6 個 section 全部的值，底層是
-`dialog` 或 `whiptail`（兩者都缺時會印出 `sudo apt install dialog`
-提示並退出）。按 Cancel / Esc 不存檔離開；存檔後會自動呼叫
-`setup.sh` 重新產生 `.env` + `compose.yaml`。
+`./setup_tui.sh` 開啟主選單。底層是 `dialog` 或 `whiptail`（兩者都
+缺時會印出 `sudo apt install dialog` 提示並退出）。按 Cancel / Esc
+不存檔離開；存檔後會自動呼叫 `setup.sh` 重新產生 `.env` +
+`compose.yaml`。
+
+主選單結構（#221）：
+
+```
+Main
+├─ image            IMAGE_NAME 偵測規則
+├─ build            APT mirrors + Dockerfile build args
+├─ Runtime  ──→     network / deploy（GPU）/ gui / environment
+├─ Mounts   ──→     volumes / devices / tmpfs
+├─ Advanced ──→     security / additional_contexts
+│                   / per_stage（條件式）/ Reset
+├─ Features         條件式 / 進階使用功能總覽（含 per_stage 狀態）
+└─ Save & Exit
+```
+
+`./setup_tui.sh <section>` 仍可直接跳到任意 section 的編輯器
+（如 `./setup_tui.sh volumes`），不必走主選單。
 
 ### setup.sh 什麼時候跑
 
 `setup.sh` 只在明確觸發時才執行 — 並不會在每次 build / run 都重跑：
 
-- **`./template/init.sh`** 建完骨架自動跑一次
-- **`make upgrade` / `./template/upgrade.sh`** subtree pull 後透過 init.sh
+- **`./.base/init.sh`** 建完骨架自動跑一次
+- **`make upgrade` / `./.base/upgrade.sh`** subtree pull 後透過 init.sh
   再跑一次，所以升級永遠會用新版 baseline 重新產出 `.env` / `compose.yaml`
 - **`./build.sh --setup` / `./run.sh --setup`**（或 `-s`）— 使用者手動觸發重跑；
   有 TTY 時先啟動 `setup_tui.sh` 讓使用者修改 `setup.conf`，無 TTY 時直接呼叫 `setup.sh`
 - **首次 bootstrap**：`./build.sh` / `./run.sh` 首次執行（`.env` 尚未存在，
   例如 CI 新 clone）會自動走相同的 TTY-aware 流程，不用帶 `--setup`
+
+> **Fresh-clone lint 覆蓋率（#216）**：`./run.sh` 在本機沒 image
+> cached 時會走 Compose auto-build — 但 auto-build **只 build
+> `target: devel`**（或 `-t` 指定的 target），會跳過 `target:
+> devel-test`（pre-#243 該 stage 名為 `test`）那層的 ShellCheck /
+> Hadolint / Bats smoke。`run.sh` 偵測到這個情況
+> 會在 `compose up` 前印一段 `[run] INFO:` 提醒（只在 TTY 環境）。
+> 想要一次取得跟 CI 同樣的完整驗證，加 `--build` flag：
+>
+> ```bash
+> ./build.sh test           # 顯式跑 lint + smoke
+> ./run.sh --build          # 跑完 lint + smoke 再 compose up
+> ./run.sh                  # 預設 — 快速路徑，跳過 lint/smoke
+> ```
 
 `setup.sh apply` 每次都會從頭重生 `compose.yaml`，但會保留既有 `.env`
 中的 `WS_PATH` / `APT_MIRROR_UBUNTU` / `APT_MIRROR_DEBIAN`，所以手動調過
@@ -301,11 +434,11 @@ git init
 git commit --allow-empty -m "chore: initial commit"
 
 # 2. 加入 subtree
-git subtree add --prefix=template \
-    https://github.com/ycpss91255-docker/template.git main --squash
+git subtree add --prefix=.base \
+    https://github.com/ycpss91255-docker/base.git main --squash
 
 # 3. 初始化 symlinks（一個指令搞定）
-./template/init.sh
+./.base/init.sh
 ```
 
 > `git subtree add` 需要 `HEAD` 存在。在剛 `git init` 且沒有任何 commit 的 repo 上會報錯 `ambiguous argument 'HEAD'` 與 `working tree has modifications`。用空 commit 建立 `HEAD`，subtree 才能 merge 進來。
@@ -327,19 +460,19 @@ make upgrade
 make upgrade VERSION=v0.3.0
 # 指定的版本若比目前 local 還舊（例如從 v0.12.0-rc1 退回 v0.11.0）會被
 # 視為隱式 downgrade 拒絕（依 SemVer §11）。如果是刻意要 rollback，自
-# 行手改 template/.version。
+# 行手改 .base/.version。
 
 # 沒有 make 時的 fallback
-./template/upgrade.sh v0.3.0
+./.base/upgrade.sh v0.3.0
 ```
 
 `upgrade.sh` 一次完成：
 
-1. `git subtree pull --prefix=template ... --squash`
-2. Post-pull 完整性檢查 — subtree marker（`template/.version`、
-   `template/init.sh`、`template/script/docker/setup.sh`）若不見了會
+1. `git subtree pull --prefix=.base ... --squash`
+2. Post-pull 完整性檢查 — subtree marker（`.base/.version`、
+   `.base/init.sh`、`.base/script/docker/setup.sh`）若不見了會
    `git reset --hard` rollback（防舊版 `git-subtree.sh` destructive FF）
-3. `./template/init.sh` 重跑：重整 root symlinks（`build.sh` / `run.sh`
+3. `./.base/init.sh` 重跑：重整 root symlinks（`build.sh` / `run.sh`
    / `Makefile` …）、把 `.gitignore` 同步到 canonical entry set、
    `git rm --cached` 已經變成 derived artifact 的舊 tracked 檔（`.env`、
    `compose.yaml`、…），最後呼叫 `setup.sh apply` 重生 `.env` +
@@ -349,8 +482,8 @@ make upgrade VERSION=v0.3.0
 
 per-repo 檔案不會被覆蓋：`<repo>/setup.conf` 保留原樣、
 `<repo>/config/`（bashrc / tmux / terminator …）也不動 — 若上游
-`template/config/` 自上次 pull 後有變動，upgrade.sh 會印出
-`diff -ruN template/config config` 提示，由你自行 reconcile。
+`.base/config/` 自上次 pull 後有變動，upgrade.sh 會印出
+`diff -ruN .base/config config` 提示，由你自行 reconcile。
 
 不要手動 `git subtree pull` — 完整性檢查、init.sh resync、sed 步驟
 很容易漏掉。
@@ -368,7 +501,7 @@ updates:
       interval: "weekly"
 ```
 
-Dependabot 會讀 `main.yaml` 裡的 `uses: ycpss91255-docker/template/...@vX.Y.Z` ref，比對 template 最新 tag 後開 PR。subtree 本身仍需在本地跑 `make upgrade VERSION=vX.Y.Z` — Dependabot 只負責 workflow ref。
+Dependabot 會讀 `main.yaml` 裡的 `uses: ycpss91255-docker/base/...@vX.Y.Z` ref，比對 template 最新 tag 後開 PR。subtree 本身仍需在本地跑 `make upgrade VERSION=vX.Y.Z` — Dependabot 只負責 workflow ref。
 
 ## CI Reusable Workflows
 
@@ -378,20 +511,20 @@ Dependabot 會讀 `main.yaml` 裡的 `uses: ycpss91255-docker/template/...@vX.Y.
 # .github/workflows/main.yaml
 jobs:
   call-docker-build:
-    uses: ycpss91255-docker/template/.github/workflows/build-worker.yaml@v1
+    uses: ycpss91255-docker/base/.github/workflows/build-worker.yaml@v1
     with:
-      image_name: ros_noetic
+      image_name: my_app
       build_args: |
-        ROS_DISTRO=noetic
-        ROS_TAG=ros-base
-        UBUNTU_CODENAME=focal
+        BASE_IMAGE=python:3.11-slim
+        APP_VERSION=1.0
+        DEBIAN_CODENAME=bookworm
 
   call-release:
     needs: call-docker-build
     if: startsWith(github.ref, 'refs/tags/')
-    uses: ycpss91255-docker/template/.github/workflows/release-worker.yaml@v1
+    uses: ycpss91255-docker/base/.github/workflows/release-worker.yaml@v1
     with:
-      archive_name_prefix: ros_noetic
+      archive_name_prefix: my_app
 ```
 
 ### build-worker.yaml 參數
@@ -435,7 +568,7 @@ make -f Makefile.ci help  # 顯示 CI 指令
 ## 目錄結構
 
 ```
-template/
+.base/
 ├── init.sh                           # 初始化 repo（新建或既有）
 ├── upgrade.sh                        # 升級 template subtree 版本
 ├── script/
@@ -455,7 +588,7 @@ template/
 │       └── ci.sh                     # CI pipeline（本地 + 遠端）
 ├── dockerfile/
 │   ├── Dockerfile.test-tools         # 預建置 lint/測試工具 image
-│   └── Dockerfile.example            # 新 repo 的 Dockerfile 範本（sys → base → devel → test → [runtime]）
+│   └── Dockerfile.example            # 新 repo 的 Dockerfile 範本（sys → devel-base → devel → devel-test → [runtime-base → runtime → runtime-test]）
 ├── setup.conf                        # 單一 runtime 配置（per-repo override: <repo>/setup.conf）
 ├── config/                           # Container 內部 shell / 工具設定
 │   ├── image_name.conf               # 預設 IMAGE_NAME 偵測規則
