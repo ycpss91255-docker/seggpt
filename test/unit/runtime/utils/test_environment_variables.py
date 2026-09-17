@@ -13,6 +13,7 @@ import pytest
 def env_module(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("USE_CUDA", raising=False)
     monkeypatch.delenv("GSI_HOME", raising=False)
+    monkeypatch.delenv("SEGGPT_PRECISION", raising=False)
     sys.modules.pop("seggpt.runtime.utils.environment_variables", None)
     import importlib
 
@@ -117,3 +118,12 @@ class TestRegisteredSingletons:
 
     def test_gsi_home_is_path_dir(self, env_module) -> None:
         assert isinstance(env_module.GSI_HOME, env_module.PathEnvironmentVariable)
+
+
+class TestSeggptPrecision:
+    def test_default_is_fp32(self, env_module) -> None:
+        assert env_module.SEGGPT_PRECISION.get() == "fp32"
+
+    def test_env_value_is_returned_verbatim(self, env_module, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("SEGGPT_PRECISION", "tf32")
+        assert env_module.SEGGPT_PRECISION.get() == "tf32"
