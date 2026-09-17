@@ -59,6 +59,10 @@ mount_4 = ${WS_PATH}/results:/workspace/results
 `setup.conf` sections replace the template's whole section, so repeat
 `mount_1` when adding mounts. `./run.sh` regenerates `compose.yaml`.
 
+Add `env_6 = SEGGPT_PRECISION=tf32` to `[environment]` on Jetson: the
+ViT-L forward is GPU-bound and PyTorch leaves TF32 matmul off by default,
+so this alone is 1.75× with no measurable accuracy change (#14).
+
 ## Verified (2026-09-17)
 
 Jetson AGX Orin 64GB, JetPack 6.2.2 / L4T R36.5.0, docker.io 29.1.3 +
@@ -67,7 +71,7 @@ nvidia-container, MAXN + jetson_clocks:
 | item | value |
 |---|---|
 | image | `seggpt:devel`, 26.1 GB (base 6.3 GB pulled + build) |
-| SegGPT ViT-L, 1 ref + 1 mask, 448 px | ~0.9 s / image fp32, ~0.48 s with `torch.autocast(fp16)` (#12), mIoU 0.935 |
+| SegGPT ViT-L, 1 ref + 1 mask, 448 px | ~0.9 s / image fp32, **~0.52 s with `SEGGPT_PRECISION=tf32`** (#14, same output), ~0.48 s with `torch.autocast(fp16)` (#12), mIoU 0.935 |
 | model load (`SegGPTBackend`) | 11–12 s |
 | RAM | 7.1 GB peak (container 6.4 GiB), no swap |
 | power | 46 W avg / 50 W peak (module), GPU rail 33.6 W |

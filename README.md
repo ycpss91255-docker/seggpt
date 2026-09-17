@@ -41,6 +41,15 @@ result = backend.infer(target_image, reference_images, reference_masks)
 # {'mask': ndarray (C,H,W), 'class_id': ndarray, 'inference_latency_ms': float, 'gpu_mem_mb': float}
 ```
 
+Precision (`SEGGPT_PRECISION`, read once when the service starts):
+
+| value | effect |
+|---|---|
+| `fp32` (default) | PyTorch defaults |
+| `tf32` | TensorFloat-32 matmul/conv on Ampere+ Tensor Cores — 1.75× on Jetson AGX Orin (895 → 516 ms), output indistinguishable from fp32 (mask agreement 0.9994 over 35 images). Recommended on Jetson. |
+
+Anything else (including `fp16`, tracked in #12) raises at startup.
+
 HTTP (Layer 3):
 
 ```bash
