@@ -21,7 +21,7 @@ from seggpt.runtime.services.import_modules import (
     import_torchvision_transforms_functional as F,
 )
 from seggpt.runtime.services.import_self import import_seggpt_model as seggpt_model
-from seggpt.runtime.services.utils import torch_use_cuda
+from seggpt.runtime.services.utils import apply_precision_from_env, torch_use_cuda
 from seggpt.runtime.utils.logger import logi_print
 from seggpt.runtime.utils.naming import to_camel_case, to_snake_case
 from seggpt.runtime.utils.tools import load_yaml
@@ -246,6 +246,8 @@ class SegGPTService(AbstractService, keywords=_keywords):
         logi_print(f"Loaded checkpoint from {checkpoint_path}: {msg}")
         model.eval()
         self._device = torch_use_cuda()
+        # SEGGPT_PRECISION (fp32 | tf32, #14): set once before the first forward.
+        logi_print(f"SegGPT precision: {apply_precision_from_env()}")
         self._target_size = [model_cfg.img_size[0] // 2, model_cfg.img_size[1]]  # [H, W]
         self._predictor = seggpt_model.SegGPTPredictor(
             model=model,

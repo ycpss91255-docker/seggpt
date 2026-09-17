@@ -38,7 +38,7 @@ class TestConfigurePrecision:
         assert torch.backends.cuda.matmul.allow_tf32 is True
 
     def test_unknown_mode_raises_listing_choices(self) -> None:
-        with pytest.raises(ValueError, match=r"SEGGPT_PRECISION.*'int4'.*fp32.*tf32"):
+        with pytest.raises(ValueError, match=r"SEGGPT_PRECISION(?=.*'int4')(?=.*fp32)(?=.*tf32)"):
             configure_precision("int4")
 
     def test_fp16_is_not_accepted_yet(self) -> None:

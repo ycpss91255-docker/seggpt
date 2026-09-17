@@ -2,7 +2,7 @@
 
 Slimmed port of ``generative_services.utils.environment_variables``.
 Only the descriptors actually referenced by the SegGPT runtime
-(``USE_CUDA`` and ``GSI_HOME``) are kept; the upstream module also
+(``USE_CUDA``, ``GSI_HOME`` and ``SEGGPT_PRECISION``) are kept; the upstream module also
 defined logger / transformers env vars that are not needed here.
 
 Implementation pattern (typed env var with default, lazy resolve via
@@ -108,4 +108,9 @@ class PathEnvironmentVariable(EnvironmentVariable):
 
 
 USE_CUDA = BooleanEnvironmentVariable("USE_CUDA", True)
+# Numeric precision of the SegGPT forward (#14). ``fp32`` = PyTorch defaults;
+# ``tf32`` = TensorFloat-32 matmul/conv on Ampere+ Tensor Cores (1.75x on
+# Jetson Orin, output indistinguishable from fp32). Validated by
+# ``seggpt.runtime.services.utils.configure_precision``.
+SEGGPT_PRECISION = EnvironmentVariable("SEGGPT_PRECISION", str, "fp32")
 GSI_HOME = PathEnvironmentVariable("GSI_HOME", "", is_dir=True)
