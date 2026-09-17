@@ -24,6 +24,10 @@ cd docker
 ./run.sh     # launch container with model + prompts mounts
 ```
 
+Jetson / L4T (JetPack 6, aarch64) builds with the same commands — the
+Dockerfile selects an arm64 flavour from `TARGETARCH`; see
+[docker/doc/jetson.md](docker/doc/jetson.md).
+
 Inside the container, Python API:
 
 ```python
