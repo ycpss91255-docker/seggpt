@@ -139,6 +139,7 @@ def test_tf32_backend_meets_the_same_miou_bar(monkeypatch: pytest.MonkeyPatch) -
     from seggpt.api import SegGPTBackend
 
     monkeypatch.setenv("SEGGPT_PRECISION", "tf32")
+    saved = (torch.backends.cuda.matmul.allow_tf32, torch.backends.cudnn.allow_tf32)
     torch.backends.cuda.matmul.allow_tf32 = False
     try:
         tf32_backend = SegGPTBackend(model_path=MODEL_PATH, config_path=CONFIG_PATH)
@@ -153,4 +154,4 @@ def test_tf32_backend_meets_the_same_miou_bar(monkeypatch: pytest.MonkeyPatch) -
             pred = cv2.resize(pred.astype(np.uint8), (expected.shape[1], expected.shape[0]), interpolation=cv2.INTER_NEAREST)
         assert _miou(pred, expected) > 0.9
     finally:
-        torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cuda.matmul.allow_tf32, torch.backends.cudnn.allow_tf32 = saved

@@ -46,7 +46,7 @@ Precision (`SEGGPT_PRECISION`, read once when the service starts):
 | value | effect |
 |---|---|
 | `fp32` (default) | PyTorch defaults |
-| `tf32` | TensorFloat-32 matmul/conv on Ampere+ Tensor Cores — 1.75× on Jetson AGX Orin (895 → 516 ms), output indistinguishable from fp32 (mask agreement 0.9994 over 35 images). Recommended on Jetson. |
+| `tf32` | TensorFloat-32 matmul/conv on Ampere+ Tensor Cores — 1.75× on Jetson AGX Orin (903 → 516 ms median over 35 images), output indistinguishable from fp32 (mask agreement 0.9994 over 35 images). Recommended on Jetson. |
 
 Anything else (including `fp16`, tracked in #12) raises at startup.
 
