@@ -2,17 +2,31 @@
 #
 # Stages:
 #   sys     - User/group, locale, timezone (template default)
-#   base    - CUDA system deps + miniconda + Python 3.11 +
-#             pytorch ecosystem (conda) + SegGPT pip deps + detectron2 v0.6
+#   base    - one of two arch-specific flavours, selected by SEGGPT_FLAVOR
+#             (defaults to BuildKit's TARGETARCH, so nothing to configure):
+#             amd64: CUDA system deps + miniconda + Python 3.11 +
+#                    pytorch ecosystem (conda) + SegGPT pip deps + detectron2 v0.6
+#             arm64: Jetson / L4T (JetPack 6) — dustynv/l4t-pytorch base
+#                    (system python3.10 + torch/cu126), SegGPT pip deps +
+#                    detectron2 v0.6 CPU-only _C
 #   devel   - Application entrypoint (interactive shell)
 #   test    - Lint + smoke test (ephemeral, discarded after build)
 #   runtime - Minimal runtime image (FastAPI server) - TODO when Layer 3 lands
 
 ARG BASE_IMAGE="nvidia/cuda:11.8.0-devel-ubuntu22.04"
+# Jetson / L4T flavour base (aarch64 only; never pulled on an amd64 build —
+# BuildKit resolves only the stages the selected flavour references).
+ARG JETSON_BASE_IMAGE="dustynv/l4t-pytorch:r36.4.0"
+# amd64 | arm64. Defaults to the build platform's arch, override with
+# --build-arg SEGGPT_FLAVOR=... (setup.conf [build] arg_N) if needed.
+ARG TARGETARCH
+ARG SEGGPT_FLAVOR="${TARGETARCH}"
 ARG TEST_TOOLS_IMAGE="test-tools:local"
 
 ############################## sys ##############################
-FROM ${BASE_IMAGE} AS sys
+FROM ${BASE_IMAGE} AS sys-amd64
+FROM ${JETSON_BASE_IMAGE} AS sys-arm64
+FROM sys-${SEGGPT_FLAVOR} AS sys
 
 # CI's build-worker.yaml passes USER/GROUP/UID/GID, while compose.yaml
 # (local flow) passes USER_NAME/USER_GROUP/USER_UID/USER_GID. Declare
@@ -62,8 +76,8 @@ RUN if getent group "${USER_GID}" >/dev/null; then \
     fi && \
     echo "${USER_NAME} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
-############################## devel-base ##############################
-FROM sys AS devel-base
+############################## devel-base (amd64: x86 CUDA 11.8 + conda) ##############################
+FROM sys AS devel-base-amd64
 
 ARG DEBIAN_FRONTEND=noninteractive
 # Same USER/USER_NAME alias dance as sys — ARGs do not flow across
@@ -182,6 +196,81 @@ RUN chown -R "${USER_NAME}":"${USER_GROUP}" "${CONDA_DIR}"
 # torch + torchvision + torchaudio + opencv all import correctly with
 # the env var unset (verified: torch 2.0.1, cuda 11.8, cudnn 8700).
 
+############################## devel-base (arm64: Jetson / L4T r36) ##############################
+FROM sys AS devel-base-arm64
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# dustynv/l4t-pytorch:r36.4.0 already ships CUDA 12.6 + cuDNN 9 + torch 2.4 /
+# torchvision / opencv on the system python3.10, so the amd64 recipe
+# (conda + pytorch-cuda=11.8 + cudnn8 apt) does not apply here.
+ENV CUDA_HOME="/usr/local/cuda"
+ENV USE_CUDA=1
+# Orin = sm_87 (only used if someone forces a CUDA build of detectron2)
+ENV TORCH_CUDA_ARCH_LIST="8.7"
+# The dustynv base bakes in PIP_INDEX_URL=http://jetson.webredirect.org/jp6/cu126
+# (its private build-time mirror, not resolvable from outside) plus
+# PIP_TRUSTED_HOST / TAR_INDEX_URL for it, so every pip install fails with
+# "Name or service not known". Point pip at PyPI; the public Jetson wheel
+# index (aarch64 + CUDA 12.6 builds) stays available as an extra index for
+# the few packages that need an L4T build.
+ENV PIP_INDEX_URL="https://pypi.org/simple"
+ENV PIP_EXTRA_INDEX_URL="https://pypi.jetson-ai-lab.io/jp6/cu126"
+ENV PIP_TRUSTED_HOST=""
+ENV TAR_INDEX_URL=""
+# No conda here: the devel stage's editable install goes to the runtime
+# user's site (~/.local) instead of a user-owned /opt/conda.
+ENV PIP_USER=1
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        -o Dpkg::Options::="--force-confdef" \
+        -o Dpkg::Options::="--force-confold" \
+        sudo \
+        git \
+        vim \
+        tmux \
+        terminator \
+        curl \
+        wget \
+        ca-certificates \
+        build-essential \
+        cmake \
+        ffmpeg \
+        libjpeg-dev \
+        libpng-dev \
+        python3-dev \
+        && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# SegGPT pip deps (same pins as amd64) + detectron2 v0.6 built from source
+# against the base image's torch. CUDA_VISIBLE_DEVICES="" forces the
+# CPU-only _C build: SegGPT only touches detectron2.layers' pure-python
+# Conv2d / get_norm / CNNBlockBase (seggpt_model.py), so the build never
+# needs nvcc even when docker's default runtime is nvidia. PIP_USER is
+# unset for this root-time install so the packages land system-wide.
+RUN PIP_USER=0 pip3 install --no-cache-dir \
+        timm==0.9.7 \
+        fairscale==0.4.13 \
+        fvcore \
+        yacs==0.1.8 \
+        pyyaml \
+        click==8.1.7 \
+        classy-fastapi==0.5.1 \
+        fastapi==0.110.1 \
+        uvicorn==0.29.0 \
+        python-multipart \
+        requests \
+        && \
+    CUDA_VISIBLE_DEVICES="" PIP_USER=0 pip3 install --no-cache-dir --no-build-isolation \
+        'git+https://github.com/facebookresearch/detectron2.git@v0.6' && \
+    (pip3 cache purge || true) && \
+    python3 -c "import torch, detectron2; from detectron2 import _C; from detectron2.layers import Conv2d, get_norm, CNNBlockBase; print(torch.__version__, detectron2.__version__)"
+
+############################## devel-base (selected flavour) ##############################
+FROM devel-base-${SEGGPT_FLAVOR} AS devel-base
+
 ############################## devel ##############################
 FROM devel-base AS devel
 
@@ -244,7 +333,11 @@ COPY --from=repo_root --chown="${USER_NAME}":"${USER_GROUP}" \
 COPY --from=repo_root --chown="${USER_NAME}":"${USER_GROUP}" \
     src /home/${USER_NAME}/work/src
 
-RUN pip install --quiet --no-cache-dir --no-deps -e "/home/${USER_NAME}/work"
+# pip3 exists in both flavours (conda's on amd64, system on arm64). On arm64
+# PIP_USER=1 (devel-base-arm64) turns this into a user-site install; on
+# amd64 /opt/conda is user-owned so it installs straight into conda.
+RUN pip3 install --quiet --no-cache-dir --no-deps -e "/home/${USER_NAME}/work" && \
+    python3 -c "from seggpt.api import SegGPTBackend; print(SegGPTBackend.__name__)"
 
 WORKDIR "/home/${USER_NAME}/work"
 
