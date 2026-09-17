@@ -129,3 +129,28 @@ def test_infer_rejects_mismatched_refs_and_masks(backend) -> None:
 
     with pytest.raises(ValueError, match="length mismatch"):
         backend.infer(target, refs, masks)
+
+
+@requires_weights
+@requires_cuda
+def test_tf32_backend_meets_the_same_miou_bar(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Acceptance for #14: ``SEGGPT_PRECISION=tf32`` is applied by the service
+    (Tensor-Core matmul on) and the hmbb contract still holds (> 0.9 mIoU)."""
+    from seggpt.api import SegGPTBackend
+
+    monkeypatch.setenv("SEGGPT_PRECISION", "tf32")
+    torch.backends.cuda.matmul.allow_tf32 = False
+    try:
+        tf32_backend = SegGPTBackend(model_path=MODEL_PATH, config_path=CONFIG_PATH)
+        assert torch.backends.cuda.matmul.allow_tf32 is True
+
+        target = _read_rgb(HMBB / "hmbb_3.jpg")
+        refs = [_read_rgb(HMBB / "hmbb_1.jpg"), _read_rgb(HMBB / "hmbb_2.jpg")]
+        masks = [_read_mask(HMBB / "hmbb_1_target.png"), _read_mask(HMBB / "hmbb_2_target.png")]
+        expected = _read_mask(EXPECTED)
+        pred = tf32_backend.infer(target, refs, masks)["mask"][0]
+        if pred.shape != expected.shape:
+            pred = cv2.resize(pred.astype(np.uint8), (expected.shape[1], expected.shape[0]), interpolation=cv2.INTER_NEAREST)
+        assert _miou(pred, expected) > 0.9
+    finally:
+        torch.backends.cuda.matmul.allow_tf32 = False
